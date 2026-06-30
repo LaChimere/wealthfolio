@@ -7367,6 +7367,11 @@ contract:
   reconcile actions with pending outbox rows take the normal push path, encrypt
   and submit the outbox event, and mark it sent. Trigger-cycle runtime tests and
   full repository check passed.
+- `pr5-addon-sdk-test-ci-entry`: verification passed. The add-on SDK package now
+  has a `test` script, root `test:addon-sdk`, `test:all`, PR workflow, and
+  `scripts/ci-check.sh --full` all include the SDK tests so the
+  `events.market.onSyncError` permission metadata evidence is no longer
+  orphaned. `bun run test:addon-sdk` and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
