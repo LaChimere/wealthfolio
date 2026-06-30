@@ -137,6 +137,40 @@ describe("TS local device sync service", () => {
       status: 500,
     });
 
+    const partiallyFailingSecretService = createMemorySecretService();
+    partiallyFailingSecretService.entries.set("sync_identity", '{"version":2,"deviceId":"old"}');
+    partiallyFailingSecretService.entries.set("sync_device_id", "old");
+    const partiallyFailingService = createLocalDeviceSyncService({
+      secretService: {
+        ...partiallyFailingSecretService,
+        setSecret: (secretKey, secret) => {
+          if (secretKey === "sync_device_id" && secret === "device-1") {
+            throw new Error("legacy keyring unavailable");
+          }
+          partiallyFailingSecretService.entries.set(secretKey, secret);
+        },
+      },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async () =>
+        Response.json({
+          mode: "READY",
+          device_id: "device-1",
+          e2ee_key_version: 2,
+          trust_state: "trusted",
+        }),
+    });
+    await expect(partiallyFailingService.registerDevice(request)).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to store device ID: legacy keyring unavailable",
+      status: 500,
+    });
+    expect(partiallyFailingSecretService.entries.get("sync_identity")).toBe(
+      '{"version":2,"deviceId":"old"}',
+    );
+    expect(partiallyFailingSecretService.entries.get("sync_device_id")).toBe("old");
+
     let enrollBody =
       '{"mode":"READY","device_id":"device-1","e2ee_key_version":2.0,"trust_state":"trusted"}';
     const malformedResponseService = createLocalDeviceSyncService({

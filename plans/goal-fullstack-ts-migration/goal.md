@@ -6024,7 +6024,8 @@ updated_at: "2026-06-30T19:56:21+09:00"
   `/api/v1/sync/device/register` now stores both the legacy `sync_device_id`
   secret and a Rust-shaped `sync_identity` with the request device nonce and
   returned cloud device ID, matching Rust enrollment identity persistence while
-  keeping E2EE keys unset until later key initialization. Focused device-sync
+  keeping E2EE keys unset until later key initialization; failed dual-secret
+  persistence now rolls back to the previous secret state. Focused device-sync
   unit/runtime tests and full repository check passed.
 
 ## Deferred items

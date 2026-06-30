@@ -211,8 +211,7 @@ export function createLocalDeviceSyncService({
       const result = enrollDeviceResponseFromCloud(enrollResponse.value, enrollResponse.bodyText);
       const deviceId = requiredString(result.device_id, "enroll response");
       try {
-        await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
-        await saveEnrolledSyncIdentity(secretService, request.instanceId, deviceId);
+        await persistEnrolledDeviceIdentity(secretService, request.instanceId, deviceId);
       } catch (error) {
         throw new DeviceSyncServiceError(
           "internal_error",
@@ -2213,6 +2212,47 @@ async function getLocalDeviceId(secretService: SecretService): Promise<string | 
     }
   }
   return await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+}
+
+async function persistEnrolledDeviceIdentity(
+  secretService: SecretService,
+  deviceNonce: string,
+  deviceId: string,
+): Promise<void> {
+  const previousIdentity = await secretService.getSecret(DEVICE_SYNC_IDENTITY_KEY);
+  const previousDeviceId = await secretService.getSecret(DEVICE_SYNC_DEVICE_ID_KEY);
+  try {
+    await saveEnrolledSyncIdentity(secretService, deviceNonce, deviceId);
+    await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
+  } catch (error) {
+    await restoreEnrollmentSecretsBestEffort(secretService, previousIdentity, previousDeviceId);
+    throw error;
+  }
+}
+
+async function restoreEnrollmentSecretsBestEffort(
+  secretService: SecretService,
+  previousIdentity: string | null,
+  previousDeviceId: string | null,
+): Promise<void> {
+  await restoreSecretBestEffort(secretService, DEVICE_SYNC_IDENTITY_KEY, previousIdentity);
+  await restoreSecretBestEffort(secretService, DEVICE_SYNC_DEVICE_ID_KEY, previousDeviceId);
+}
+
+async function restoreSecretBestEffort(
+  secretService: SecretService,
+  key: string,
+  value: string | null,
+): Promise<void> {
+  try {
+    if (value === null) {
+      await secretService.deleteSecret(key);
+    } else {
+      await secretService.setSecret(key, value);
+    }
+  } catch {
+    // Preserve the original persistence error; recovery is best-effort.
+  }
 }
 
 async function saveEnrolledSyncIdentity(

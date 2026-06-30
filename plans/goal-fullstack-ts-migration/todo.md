@@ -7575,8 +7575,9 @@ contract:
   Successful TS `/api/v1/sync/device/register` now stores both the legacy
   `sync_device_id` secret and a Rust-shaped `sync_identity` with the request
   device nonce and returned cloud device ID, keeping E2EE keys unset until later
-  key initialization. Focused device-sync unit/runtime tests and full repository
-  check passed.
+  key initialization; failed dual-secret persistence now rolls back to the
+  previous secret state. Focused device-sync unit/runtime tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
