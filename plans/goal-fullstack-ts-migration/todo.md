@@ -7443,6 +7443,12 @@ contract:
   `toolCall`/`toolResult`/`textDelta` events, and feed the tool result into the
   follow-up provider request. Focused runtime tests and full repository check
   passed.
+- `pr5-provider-ai-runtime-dual-review`: verification passed. Claude Opus 4.8
+  xhigh and GPT-5.5 xhigh reviewed general custom-provider latest/history
+  runtime evidence plus AI tool execution. The actionable AI allowlist assertion
+  gap was fixed by asserting the exact normalized tool list and excluding
+  mutation/CSV tools; focused provider/AI runtime tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1064
+turns_used: 1065
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T16:08:42+09:00"
+updated_at: "2026-06-30T16:22:20+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5895,6 +5895,11 @@ updated_at: "2026-06-30T16:08:42+09:00"
   `toolCall`/`toolResult`/`textDelta` events, and feed the tool result into the
   follow-up provider request. Focused runtime tests and full repository check
   passed.
+- Turn 1065: Ran dual-model provider/AI runtime evidence review and addressed
+  the actionable finding. The AI stream smoke now asserts the exact normalized
+  tool allowlist (`get_accounts`, `get_cash_balances`) and excludes mutation/CSV
+  tools, while the general custom-provider runtime evidence had no actionable
+  issues. Focused provider/AI runtime tests and full repository check passed.
 
 ## Deferred items
 
