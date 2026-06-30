@@ -7372,6 +7372,11 @@ contract:
   `scripts/ci-check.sh --full` all include the SDK tests so the
   `events.market.onSyncError` permission metadata evidence is no longer
   orphaned. `bun run test:addon-sdk` and full repository check passed.
+- `pr5-backend-contracts-test-ci-entry`: verification passed. Root scripts now
+  expose `test:backend-contracts`, `test:all`, PR workflow, and
+  `scripts/ci-check.sh --full` all include backend contract tests so command
+  surface, normalization, and compatibility preflight evidence is covered by CI.
+  `bun run test:backend-contracts` and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
