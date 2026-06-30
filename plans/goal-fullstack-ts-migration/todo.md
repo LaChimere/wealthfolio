@@ -7395,6 +7395,11 @@ contract:
   GPT-5.5 xhigh reviewed package test wiring, add-on canary coverage, Rust
   config test relocation, and market-data fixture time stabilization, finding no
   actionable CI, runtime/test, canary, date/time, or scope issues.
+- `pr5-runtime-portfolio-account-scope-routes`: verification passed. The
+  standalone TS runtime now proves Portfolio filters resolve through the
+  injected portfolio service for holdings, allocations, and income summary query
+  routes instead of hitting the optional-service guard. Focused runtime tests
+  and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
