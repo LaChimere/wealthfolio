@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
     brokerSyncStartHandler: undefined as ((event: unknown) => void) | undefined,
     brokerSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
     marketSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
+    marketSyncErrorHandler: undefined as ((event: unknown) => void) | undefined,
     listenerNames,
     unlisteners,
     updatePortfolio: vi.fn().mockResolvedValue(undefined),
@@ -54,6 +55,9 @@ vi.mock("@/adapters", () => {
         }
         if (name === "listenMarketSyncComplete") {
           mocks.marketSyncCompleteHandler = handler;
+        }
+        if (name === "listenMarketSyncError") {
+          mocks.marketSyncErrorHandler = handler;
         }
         return Promise.resolve(mocks.unlisteners[name]);
       }),
@@ -87,6 +91,7 @@ afterEach(() => {
   mocks.brokerSyncStartHandler = undefined;
   mocks.brokerSyncCompleteHandler = undefined;
   mocks.marketSyncCompleteHandler = undefined;
+  mocks.marketSyncErrorHandler = undefined;
   mocks.updatePortfolio.mockClear();
   mocks.navigate.mockClear();
   mocks.logger.debug.mockClear();
@@ -217,5 +222,30 @@ describe("useGlobalEventListener", () => {
     };
     toastOptions.action.onClick();
     expect(mocks.navigate).toHaveBeenCalledWith("/health");
+  });
+
+  it("handles market sync error payloads from the event bridge", async () => {
+    const queryClient = new QueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    }
+
+    renderHook(() => useGlobalEventListener(), { wrapper: Wrapper });
+    await waitFor(() => expect(mocks.marketSyncErrorHandler).toBeDefined());
+
+    act(() => {
+      mocks.marketSyncErrorHandler?.({
+        event: "market:sync-error",
+        id: 3,
+        payload: "Provider unavailable",
+      });
+    });
+
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith("market-sync-start");
+    expect(mocks.toast.error).toHaveBeenCalledWith("Market Data Sync Failed", {
+      description: "Provider unavailable. Please try again later.",
+      duration: 10000,
+    });
+    expect(mocks.logger.error).toHaveBeenCalledWith("Market sync error: Provider unavailable");
   });
 });
