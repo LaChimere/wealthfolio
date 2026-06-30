@@ -6208,6 +6208,16 @@ updated_at: "2026-07-01T00:39:21+09:00"
   `config_error` cycles, applies Rust-compatible exponential backoff after five
   repeats, caps delay at one hour, and resets the counter on stop or successful
   cycles. Full Connect/device-sync tests and full repository check passed.
+- Turn 1127: Addressed unclassified-assets health review feedback.
+  Classification severity now uses the same all-instrument portfolio-value
+  denominator as the other health checks while still only flagging MARKET-priced
+  positive holdings as unclassified candidates. Focused health tests and full
+  repository check passed.
+- Turn 1128: Strengthened cross-platform keyring CI evidence. The
+  keyring-focused backend selector now includes a native `@napi-rs/keyring`
+  binding import check, so the Ubuntu/macOS/Windows PR matrix catches missing
+  platform bindings without requiring OS keychain access. Focused keyring tests
+  and full repository check passed.
 
 ## Deferred items
 

@@ -7768,6 +7768,17 @@ contract:
   `config_error` cycles, applies Rust-compatible exponential backoff after five
   repeats, caps delay at one hour, and resets the counter on stop or successful
   cycles. Full Connect/device-sync tests and full repository check passed.
+- `pr5-health-unclassified-denominator-review-fix`: verification passed. Review
+  found unclassified-assets severity used a MARKET-only denominator; severity
+  now uses the same all-instrument portfolio-value denominator as other health
+  checks while still only flagging MARKET-priced positive holdings as
+  unclassified candidates. Focused health tests and full repository check
+  passed.
+- `pr5-cross-platform-keyring-native-load`: verification passed. The
+  keyring-focused backend selector now includes a native `@napi-rs/keyring`
+  binding import check, so the Ubuntu/macOS/Windows PR matrix catches missing
+  platform bindings without requiring OS keychain access. Focused keyring tests
+  and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

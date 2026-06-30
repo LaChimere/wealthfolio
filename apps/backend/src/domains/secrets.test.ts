@@ -28,6 +28,11 @@ describe("TS secrets domain", () => {
     );
   });
 
+  test("loads the native keyring binding package for desktop secrets", async () => {
+    const keyring = await import("@napi-rs/keyring");
+    expect(typeof keyring.Entry).toBe("function");
+  });
+
   test("uses native keyring entries for namespaced desktop secrets", () => {
     const stored = new Map<string, string>();
     const calls: Array<{
