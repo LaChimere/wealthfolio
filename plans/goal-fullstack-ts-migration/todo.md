@@ -7405,6 +7405,10 @@ contract:
   composed contribution deposit calculator with base-currency settings and
   posted activity reads instead of hitting the optional calculator guard.
   Focused runtime test and full repository check passed.
+- `pr5-runtime-portfolio-account-scope-query-family`: verification passed. The
+  Portfolio filter smoke now covers holdings, allocations, allocation holdings,
+  and income summary query routes through the standalone TS runtime. Focused
+  runtime test and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
