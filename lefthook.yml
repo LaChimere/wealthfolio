@@ -1,0 +1,9 @@
+pre-commit:
+  commands:
+    check:
+      run: bun run check
+
+pre-push:
+  commands:
+    full-check:
+      run: ./scripts/ci-check.sh --full

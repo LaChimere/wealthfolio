@@ -10,7 +10,7 @@ const frontendSrcDir = path.resolve(currentDir, "..");
 const repoRoot = path.resolve(currentDir, "../../../..");
 
 const INVOKE_COMMAND_RE = /invoke(?:<[^>]+>)?\(\s*['"`]([a-zA-Z0-9_]+)['"`]/g;
-const TAURI_REGISTERED_COMMAND_RE = /commands::[a-z_]+::([a-zA-Z0-9_]+)/g;
+const ELECTRON_REGISTERED_COMMAND_RE = /^\s*([a-zA-Z0-9_]+):\s*\{/gm;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -45,9 +45,41 @@ function collectInvokedCommands(files: string[]): Map<string, string[]> {
   return commands;
 }
 
-function collectRegisteredTauriCommands(): Set<string> {
-  const source = readFileSync(path.join(repoRoot, "apps/tauri/src/lib.rs"), "utf8");
-  return new Set([...source.matchAll(TAURI_REGISTERED_COMMAND_RE)].map((match) => match[1]));
+function collectRegisteredElectronCommands(): Set<string> {
+  const source = readFileSync(path.join(repoRoot, "apps/electron/src/shared/ipc.ts"), "utf8");
+  return new Set(
+    [
+      ...extractExportedObjectLiteral(source, "ELECTRON_COMMANDS").matchAll(
+        ELECTRON_REGISTERED_COMMAND_RE,
+      ),
+    ].map((match) => match[1]),
+  );
+}
+
+function extractExportedObjectLiteral(source: string, exportName: string): string {
+  const exportIndex = source.indexOf(`export const ${exportName}`);
+  if (exportIndex < 0) {
+    throw new Error(`Could not find exported object ${exportName}`);
+  }
+  const objectStart = source.indexOf("{", exportIndex);
+  if (objectStart < 0) {
+    throw new Error(`Could not find object literal for ${exportName}`);
+  }
+
+  let depth = 0;
+  for (let index = objectStart; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(objectStart, index + 1);
+      }
+    }
+  }
+
+  throw new Error(`Could not find end of object literal for ${exportName}`);
 }
 
 describe("adapter command parity", () => {
@@ -66,13 +98,31 @@ describe("adapter command parity", () => {
     expect(missing).toEqual([]);
   });
 
-  it("registers every command reachable from the Tauri adapter", () => {
+  it("keeps every command reachable from the Electron adapter aligned with web or Electron IPC", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
-      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/tauri")),
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/electron")),
     ];
     const invokedCommands = collectInvokedCommands(files);
-    const registeredCommands = collectRegisteredTauriCommands();
+    const registeredCommands = collectRegisteredElectronCommands();
+    const webCommands = new Set(Object.keys(COMMANDS));
+
+    const missing = [...invokedCommands.entries()]
+      .filter(([command]) => !webCommands.has(command) && !registeredCommands.has(command))
+      .map(([command, files]) => `${command}: ${files.join(", ")}`)
+      .sort();
+
+    expect(missing).toEqual([]);
+  });
+
+  it("registers every command reachable from the Electron adapter in Electron IPC", () => {
+    const files = [
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
+      ...collectSourceFiles(path.join(frontendSrcDir, "adapters/electron")),
+    ];
+    const invokedCommands = collectInvokedCommands(files);
+    const registeredCommands = collectRegisteredElectronCommands();
+    expect(registeredCommands.has("position")).toBe(false);
 
     const missing = [...invokedCommands.entries()]
       .filter(([command]) => !registeredCommands.has(command))
@@ -104,6 +154,23 @@ describe("adapter command parity", () => {
       taxonomyId: "asset_classes",
       categoryId: "EQUITY",
     });
+  });
+
+  it("encodes AI provider model-list route parameters", async () => {
+    const response = new Response(JSON.stringify({ models: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(invoke("list_ai_models", { providerId: "open/ai" })).resolves.toEqual({
+      models: [],
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/ai/providers/open%2Fai/models");
+    expect(init.method).toBe("GET");
   });
 });
 
@@ -310,5 +377,22 @@ describe("scope-based routing — get_income_summary", () => {
     expect(JSON.parse(body as string)).toEqual({
       filter: { type: "accounts", accountIds: ["acc_1", "acc_2"] },
     });
+  });
+
+  it("routes alternative asset liability links to the server endpoint", async () => {
+    const response = new Response(null, { status: 204 });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await invoke("link_liability", {
+      liabilityId: "liability/1",
+      request: { targetAssetId: "asset-1" },
+    });
+    await invoke("unlink_liability", { liabilityId: "liability/1" });
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ["/api/v1/alternative-assets/liability%2F1/link-liability", "POST"],
+      ["/api/v1/alternative-assets/liability%2F1/link-liability", "DELETE"],
+    ]);
   });
 });

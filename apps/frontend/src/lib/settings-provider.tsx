@@ -1,4 +1,11 @@
-import { isDesktop, logger } from "@/adapters";
+import {
+  getWindowTheme,
+  isDesktop,
+  listenWindowThemeChanged,
+  logger,
+  setWindowTheme,
+} from "@/adapters";
+import type { UnlistenFn } from "@/adapters";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
 import { useSettings } from "@/hooks/use-settings";
@@ -98,7 +105,8 @@ export function useSettingsContext() {
   return context;
 }
 // Keep references to system theme listeners so we can clean up when switching modes
-let tauriThemeUnlisten: (() => void) | null = null;
+let windowThemeUnlisten: UnlistenFn | null = null;
+let windowThemeListenerGeneration = 0;
 let mediaQueryList: MediaQueryList | null = null;
 let mediaQueryUnsubscribe: (() => void) | null = null;
 
@@ -111,13 +119,13 @@ function applyResolvedTheme(resolved: "light" | "dark") {
 
 // Cleanup any existing system listeners
 function cleanupSystemThemeListeners() {
-  if (tauriThemeUnlisten) {
-    try {
-      tauriThemeUnlisten();
-    } catch {
+  windowThemeListenerGeneration += 1;
+  if (windowThemeUnlisten) {
+    const unlisten = windowThemeUnlisten;
+    windowThemeUnlisten = null;
+    void unlisten().catch(() => {
       // noop
-    }
-    tauriThemeUnlisten = null;
+    });
   }
   if (mediaQueryUnsubscribe) {
     try {
@@ -149,49 +157,66 @@ const applySettingsToDocument = (newSettings: Settings) => {
   // Handle theme mode
   if (newSettings.theme === "system") {
     // Resolve initial theme from media query (immediate), fallback to light
-    let initial: "light" | "dark" = "dark";
+    let initial: "light" | "dark" = "light";
     if (typeof window !== "undefined" && window.matchMedia) {
       mediaQueryList = window.matchMedia("(prefers-color-scheme: dark)");
       initial = mediaQueryList.matches ? "dark" : "light";
-      const handler = (e: MediaQueryListEvent) => applyResolvedTheme(e.matches ? "dark" : "light");
-      if (mediaQueryList.addEventListener) {
-        mediaQueryList.addEventListener("change", handler);
-        mediaQueryUnsubscribe = () => mediaQueryList?.removeEventListener("change", handler);
-      } else {
-        // Legacy API support - addListener is deprecated but needed for older browsers
-        mediaQueryList.addListener(handler);
-        mediaQueryUnsubscribe = () => {
-          try {
-            mediaQueryList?.removeListener(handler);
-          } catch {
-            // noop
-          }
-        };
+      if (!isDesktop) {
+        const handler = (e: MediaQueryListEvent) =>
+          applyResolvedTheme(e.matches ? "dark" : "light");
+        if (mediaQueryList.addEventListener) {
+          mediaQueryList.addEventListener("change", handler);
+          mediaQueryUnsubscribe = () => mediaQueryList?.removeEventListener("change", handler);
+        } else {
+          // Legacy API support - addListener is deprecated but needed for older browsers
+          mediaQueryList.addListener(handler);
+          mediaQueryUnsubscribe = () => {
+            try {
+              mediaQueryList?.removeListener(handler);
+            } catch {
+              // noop
+            }
+          };
+        }
       }
     }
 
-    // On desktop, also sync with Tauri window theme + listen to OS changes
+    // On desktop, also sync the native window theme + listen to OS changes.
     if (isDesktop) {
+      const listenerGeneration = windowThemeListenerGeneration;
       (async () => {
         try {
-          const { getCurrentWindow } = await import("@tauri-apps/api/window");
-          const currentWindow = getCurrentWindow();
-          await currentWindow.setTheme(null);
-          const current = await currentWindow.theme();
-          if (current === "dark" || current === "light") {
+          await setWindowTheme(null);
+          const current = await getWindowTheme();
+          if (listenerGeneration !== windowThemeListenerGeneration) {
+            return;
+          }
+          if (current) {
             applyResolvedTheme(current);
           }
-          tauriThemeUnlisten = await currentWindow.onThemeChanged(({ payload }) => {
-            const next = payload === "dark" ? "dark" : "light";
-            applyResolvedTheme(next);
+
+          const unlisten = await listenWindowThemeChanged((next) => {
+            if (listenerGeneration === windowThemeListenerGeneration) {
+              applyResolvedTheme(next);
+            }
           });
+          if (listenerGeneration !== windowThemeListenerGeneration) {
+            void unlisten();
+            return;
+          }
+          windowThemeUnlisten = unlisten;
         } catch {
           logger.error("Error setting window theme.");
+          if (listenerGeneration === windowThemeListenerGeneration) {
+            applyResolvedTheme(initial);
+          }
         }
       })();
     }
 
-    applyResolvedTheme(initial);
+    if (!isDesktop) {
+      applyResolvedTheme(initial);
+    }
     return;
   }
 
@@ -199,13 +224,11 @@ const applySettingsToDocument = (newSettings: Settings) => {
   const explicit = newSettings.theme === "dark" ? "dark" : "light";
   applyResolvedTheme(explicit);
 
-  // Only call Tauri window APIs when running the desktop app for explicit modes
+  // Only call native window APIs when running the desktop app for explicit modes.
   if (isDesktop) {
     (async () => {
       try {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        const currentWindow = getCurrentWindow();
-        await currentWindow.setTheme(explicit);
+        await setWindowTheme(explicit);
       } catch {
         logger.error("Error setting window theme.");
       }

@@ -1,6 +1,6 @@
 //! Sync Crypto API endpoints for the web server.
 //!
-//! This module provides REST endpoints that mirror the Tauri sync crypto commands,
+//! This module provides REST endpoints that mirror the desktop sync crypto commands,
 //! using the shared wealthfolio-device-sync crate for cryptographic operations.
 
 use std::sync::Arc;

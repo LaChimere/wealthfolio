@@ -210,7 +210,7 @@ async fn process_event_batch(events: &[DomainEvent], deps: Arc<QueueWorkerDeps>)
         // guard properly tracks completion and prevents concurrent jobs
         run_portfolio_job(deps.clone(), config).await;
 
-        // Keep goal cards current after valuation changes, matching the Tauri worker.
+        // Keep goal cards current after valuation changes, matching desktop behavior.
         refresh_all_goal_summaries(deps.clone()).await;
     }
 

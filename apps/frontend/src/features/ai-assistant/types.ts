@@ -377,6 +377,10 @@ export const ERROR_CODE_MAP: Record<string, { message: string; retryable: boolea
     message: "Invalid input. Please check your message and try again.",
     retryable: false,
   },
+  notImplemented: {
+    message: "This AI assistant capability is not available in the current runtime yet.",
+    retryable: false,
+  },
   internal: {
     message: "An unexpected error occurred. Please try again.",
     retryable: true,
@@ -391,13 +395,44 @@ export const ERROR_CODE_MAP: Record<string, { message: string; retryable: boolea
   },
 };
 
+const ERROR_CODE_ALIASES: Record<string, keyof typeof ERROR_CODE_MAP> = {
+  INVALID_INPUT: "invalidInput",
+  MISSING_API_KEY: "missingApiKey",
+  PROVIDER_ERROR: "providerError",
+  TOOL_NOT_FOUND: "toolNotFound",
+  TOOL_NOT_ALLOWED: "toolNotAllowed",
+  TOOL_EXECUTION_FAILED: "toolExecutionError",
+  THREAD_NOT_FOUND: "threadNotFound",
+  INVALID_CURSOR: "invalidInput",
+  INTERNAL_ERROR: "internal",
+  CORE_ERROR: "internal",
+  provider_not_configured: "providerNotConfigured",
+  missing_api_key: "missingApiKey",
+  model_not_found: "modelNotFound",
+  tool_not_found: "toolNotFound",
+  tool_not_allowed: "toolNotAllowed",
+  tool_execution_failed: "toolExecutionError",
+  provider_error: "providerError",
+  thread_not_found: "threadNotFound",
+  invalid_input: "invalidInput",
+  internal_error: "internal",
+  not_implemented: "notImplemented",
+};
+
 /**
  * Parse an error code and return a ChatError with user-friendly message.
  */
 export function parseErrorCode(code: string, rawMessage?: string): ChatError {
-  const mapped = ERROR_CODE_MAP[code];
+  const mapped = ERROR_CODE_MAP[ERROR_CODE_ALIASES[code] ?? code];
   if (mapped) {
-    return { code, message: mapped.message, retryable: mapped.retryable };
+    return {
+      code,
+      message:
+        (code === "invalid_input" || code === "INVALID_INPUT") && rawMessage
+          ? rawMessage
+          : mapped.message,
+      retryable: mapped.retryable,
+    };
   }
   // Fallback for unknown error codes
   return {

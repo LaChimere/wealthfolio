@@ -41,6 +41,46 @@ function hasDuplicateWarning(draft: DraftActivity): boolean {
   );
 }
 
+function pendingAssetIdentity(asset: ReturnType<typeof buildNewAssetFromDraft>): string | null {
+  if (!asset?.instrumentType || !asset.instrumentSymbol || !asset.quoteCcy) {
+    return null;
+  }
+  const instrumentType = asset.instrumentType.trim().toUpperCase();
+  const parsedPair =
+    instrumentType === "FX" || instrumentType === "CRYPTO"
+      ? parsePairSymbol(asset.instrumentSymbol, asset.quoteCcy)
+      : null;
+  return [
+    instrumentType,
+    parsedPair?.base ?? asset.instrumentSymbol.trim().toUpperCase(),
+    asset.instrumentExchangeMic?.trim().toUpperCase() ?? "",
+    parsedPair?.quote ?? asset.quoteCcy.trim().toUpperCase(),
+  ].join("::");
+}
+
+function parsePairSymbol(symbol: string, quoteCcy: string): { base: string; quote: string } | null {
+  const normalizedQuote = quoteCcy.trim().toUpperCase();
+  const trimmed = symbol.trim().toUpperCase().replace(/=X$/, "");
+  const slashParts = trimmed.split("/");
+  if (
+    slashParts.length === 2 &&
+    slashParts[0] &&
+    slashParts[1] &&
+    /^[A-Z]{3,5}$/.test(slashParts[1])
+  ) {
+    return { base: slashParts[0], quote: slashParts[1] };
+  }
+  const hyphen = trimmed.lastIndexOf("-");
+  if (hyphen > 0 && hyphen < trimmed.length - 1) {
+    const base = trimmed.slice(0, hyphen);
+    const quote = trimmed.slice(hyphen + 1);
+    if (/^[A-Z]{3,5}$/.test(quote)) {
+      return { base, quote };
+    }
+  }
+  return normalizedQuote ? { base: trimmed, quote: normalizedQuote } : null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,22 +316,24 @@ export function ConfirmStep() {
 
     try {
       const pendingAssets = new Map<string, ReturnType<typeof buildNewAssetFromDraft>>();
-
+      const pendingIdentityByKey = new Map<string, string>();
+      const duplicatePendingKeyTarget = new Map<string, string>();
+      const addPendingAsset = (key: string, asset: ReturnType<typeof buildNewAssetFromDraft>) => {
+        if (!asset) return;
+        const identity = pendingAssetIdentity(asset);
+        const existingKey = identity ? pendingIdentityByKey.get(identity) : undefined;
+        if (existingKey) {
+          duplicatePendingKeyTarget.set(key, existingKey);
+          return;
+        }
+        pendingAssets.set(key, asset);
+        if (identity) {
+          pendingIdentityByKey.set(identity, key);
+        }
+      };
       for (const pending of Object.values(state.pendingImportAssets)) {
-        pendingAssets.set(pending.key, pending.draft);
-      }
-
-      for (const draft of draftsToImport) {
-        if (draft.assetId) {
-          continue;
-        }
-        const key = draft.importAssetKey || draft.assetCandidateKey;
-        if (!key || pendingAssets.has(key)) {
-          continue;
-        }
-        const nextAsset = buildNewAssetFromDraft(draft);
-        if (nextAsset) {
-          pendingAssets.set(key, nextAsset);
+        if (pending.source === "manual") {
+          addPendingAsset(pending.key, pending.draft);
         }
       }
 
@@ -301,6 +343,12 @@ export function ConfirmStep() {
         }
         const created = await createAsset(assetDraft);
         createdAssetIdsByKey[key] = created.id;
+      }
+      for (const [duplicateKey, targetKey] of duplicatePendingKeyTarget) {
+        const targetAssetId = createdAssetIdsByKey[targetKey];
+        if (targetAssetId) {
+          createdAssetIdsByKey[duplicateKey] = targetAssetId;
+        }
       }
 
       persistCreatedAssets(createdAssetIdsByKey);

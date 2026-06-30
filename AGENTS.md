@@ -47,8 +47,11 @@ common task playbooks.
 ## Overview
 
 - **Frontend**: React + Vite + Tailwind v4 + shadcn (`apps/frontend/`)
-- **Desktop**: Tauri/Rust with SQLite (`apps/tauri/`, `crates/`)
-- **Web mode**: Axum HTTP server (`apps/server/`)
+- **Desktop**: Electron main/preload with a Bun TypeScript backend sidecar
+  (`apps/electron/`, `apps/backend/`)
+- **Web mode**: Bun TypeScript backend (`apps/backend/`)
+- **Legacy Rust reference**: `apps/server/` and `crates/` remain compatibility
+  and behavior-parity references during the TS migration.
 - **Packages**: `@wealthfolio/ui`, addon-sdk, addon-dev-tools (`packages/`)
 
 ## Code Layout
@@ -59,15 +62,18 @@ apps/frontend/
 │   ├── pages/          # Route pages
 │   ├── components/     # Shared components
 │   ├── features/       # Self-contained feature modules
-│   ├── commands/       # Backend call wrappers (Tauri/Web)
-│   ├── adapters/       # Runtime detection (desktop vs web)
+│   ├── commands/       # Backend call wrappers (Desktop/Web)
+│   ├── adapters/       # Runtime adapters (Electron/Web)
 │   └── addons/         # Addon runtime
 
-apps/tauri/src/
-└── commands/           # Tauri IPC commands
+apps/electron/
+└── src/                # Electron main/preload/shared IPC
+
+apps/backend/
+└── src/                # Bun/TypeScript backend runtime
 
 apps/server/src/
-└── api/                # Axum HTTP handlers
+└── api/                # Legacy Axum compatibility/reference handlers
 
 crates/
 ├── core/               # Business logic, models, services
@@ -80,15 +86,22 @@ crates/
 
 ## Run Targets
 
-| Task         | Command            |
-| ------------ | ------------------ |
-| Desktop dev  | `pnpm tauri dev`   |
-| Web dev      | `pnpm run dev:web` |
-| Tests (TS)   | `pnpm test`        |
-| Tests (Rust) | `cargo test`       |
-| Type check   | `pnpm type-check`  |
-| Lint         | `pnpm lint`        |
-| All checks   | `pnpm check`       |
+| Task           | Command                    |
+| -------------- | -------------------------- |
+| Desktop dev    | `bun run dev:electron`     |
+| Web dev        | `bun run dev:web`          |
+| Tests (TS)     | `bun run test`             |
+| Tests (Rust)   | `cargo test`               |
+| Type check     | `bun run type-check`       |
+| Lint           | `bun run lint`             |
+| All checks     | `bun run check`            |
+| Electron build | `bun run build:electron`   |
+| Electron pkg   | `bun run package:electron` |
+| Git hooks      | `bun run hooks:install`    |
+
+`bun run dev:electron` uses an isolated `.dev` desktop data root and keyring
+namespace. Packaged Electron builds reuse the legacy production desktop data
+root for migration continuity.
 
 ---
 
@@ -100,10 +113,12 @@ crates/
    `apps/frontend/src/routes.tsx`
 2. **Command wrapper** → `apps/frontend/src/commands/<domain>.ts` (follow
    `RUN_ENV` pattern)
-3. **Tauri command** → `apps/tauri/src/commands/*.rs`, wire in `mod.rs` +
-   `lib.rs`
-4. **Web endpoint** → `apps/server/src/api/`, call `crates/core` service
-5. **Core logic** → `crates/core/` services/repos
+3. **Electron IPC** → `apps/electron/src/shared/ipc.ts` +
+   `apps/electron/src/main/commands.ts`
+4. **Backend endpoint** → `apps/backend/src/http.ts` + domain service in
+   `apps/backend/src/domains/`
+5. **Rust parity reference** → check `apps/server/src/api/` and `crates/core/`
+   when porting existing behavior
 6. **Tests** → Vitest for TS, `#[test]` for Rust
 
 ### UI patterns
@@ -116,13 +131,13 @@ crates/
 ### Architecture pattern
 
 ```
-Frontend → Adapter (tauri/web) → Command wrapper
+Frontend → Adapter (Electron/Web) → Command wrapper
                 ↓
-        Tauri IPC  |  Axum HTTP
+        Electron IPC + Bun backend | Bun HTTP
                 ↓
-           crates/core (business logic)
+        apps/backend domains (business logic)
                 ↓
-           crates/storage-sqlite
+        Bun SQLite storage (shared Rust migrations as schema source)
 ```
 
 ---
@@ -140,7 +155,8 @@ Frontend → Adapter (tauri/web) → Command wrapper
 
 - Idiomatic Rust, small focused functions
 - `Result`/`Option`, propagate with `?`, `thiserror` for domain errors
-- Keep Tauri/Axum commands thin—delegate to `crates/core`
+- Keep legacy Rust/Axum reference changes thin and preserve parity with the TS
+  backend when touching migration-sensitive behavior.
 - Migrations in `crates/storage-sqlite/migrations`
 
 ### Security
@@ -155,8 +171,8 @@ Frontend → Adapter (tauri/web) → Command wrapper
 
 Before completing any task:
 
-- [ ] Builds: `pnpm build` or `pnpm tauri dev` or `cargo check`
-- [ ] Tests pass: `pnpm test` and/or `cargo test`
+- [ ] Builds: `bun run build`, `bun run build:electron`, or `cargo check`
+- [ ] Tests pass: `bun run test` and/or `cargo test`
 - [ ] Both desktop and web compile if touching shared code
 - [ ] Changes are minimal and surgical
 

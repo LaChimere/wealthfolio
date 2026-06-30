@@ -143,6 +143,15 @@ pub fn app_router(state: Arc<AppState>, config: &Config) -> Router {
         protected_api
     };
 
+    let protected_api = if let Some(sidecar) = &config.sidecar {
+        protected_api.layer(middleware::from_fn_with_state(
+            Arc::new(sidecar.token.clone()),
+            auth::require_sidecar_token,
+        ))
+    } else {
+        protected_api
+    };
+
     // Rate limit login: 5 requests per 60 seconds per peer IP
     let login_governor = GovernorConfigBuilder::default()
         .per_second(12) // replenish 1 token every 12s → 5 per 60s

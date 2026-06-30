@@ -406,7 +406,7 @@ const AccountPage = () => {
           />
         }
       >
-        <div className="flex items-center gap-2" data-tauri-drag-region="true">
+        <div className="flex items-center gap-2" data-desktop-drag-region="true">
           {/* Tracking mode avatar */}
           {account && (
             <div className="bg-primary/10 dark:bg-primary/20 flex size-9 shrink-0 items-center justify-center rounded-full">

@@ -4,12 +4,12 @@
  * Runtime environment constants
  */
 export const RunEnvs = {
-  DESKTOP: "desktop",
+  ELECTRON: "electron",
   WEB: "web",
 } as const;
 
 /**
- * Runtime environment type - either desktop (Tauri) or web
+ * Runtime environment type - Electron desktop or web.
  */
 export type RunEnv = (typeof RunEnvs)[keyof typeof RunEnvs];
 
@@ -22,6 +22,9 @@ export type EventCallback<T> = (event: { event: string; payload: T; id: number }
  * Function to unsubscribe from an event
  */
 export type UnlistenFn = () => Promise<void>;
+
+export type WindowTheme = "light" | "dark";
+export type WindowThemePreference = WindowTheme | null;
 
 /**
  * Logger interface with standard logging methods
@@ -39,7 +42,7 @@ export interface DataExportResult {
   filename?: string;
 }
 
-// Addon types from SDK, re-exported with Tauri serialization adjustments
+// Addon types from SDK, re-exported with backend serialization adjustments
 import type {
   AddonInstallResult,
   AddonManifest,
@@ -51,7 +54,7 @@ import type {
   Permission,
 } from "@wealthfolio/addon-sdk";
 
-// Tauri-specific types with camelCase serialization to match Rust
+// Backend-specific types with camelCase serialization to match Rust
 export interface AddonFile extends Omit<BaseAddonFile, "is_main"> {
   isMain: boolean;
 }
@@ -74,9 +77,9 @@ export interface ExtractedAddon {
 
 export interface InstalledAddon {
   metadata: AddonManifest;
-  /** File path where the addon is stored (Tauri-specific) */
+  /** File path where the addon is stored */
   filePath: string;
-  /** Whether this is a ZIP-based addon (Tauri-specific) */
+  /** Whether this is a ZIP-based addon */
   isZipAddon: boolean;
 }
 
@@ -179,7 +182,7 @@ export interface PlatformInfo {
   arch?: string;
   is_mobile: boolean;
   is_desktop: boolean;
-  is_tauri?: boolean;
+  is_electron?: boolean;
   capabilities?: PlatformCapabilities;
 }
 

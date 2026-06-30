@@ -208,7 +208,7 @@ function main() {
     port,
     addonPath: path.resolve(addonPath),
     manifestPath: path.resolve(addonPath, 'manifest.json'),
-    buildCommand: 'npm run build',
+    buildCommand: 'bun run build',
     watchPaths: [
       path.resolve(addonPath, 'src'),
       path.resolve(addonPath, 'manifest.json'),

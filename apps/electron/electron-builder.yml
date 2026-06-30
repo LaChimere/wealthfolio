@@ -1,0 +1,48 @@
+appId: com.teymz.wealthfolio
+productName: Wealthfolio
+copyright: Copyright 2026 Teymz Inc.
+asar: true
+afterPack: ../../scripts/electron-after-pack.cjs
+
+directories:
+  output: ../../target/electron
+
+files:
+  - package.json
+  - dist/**
+
+publish:
+  provider: github
+  owner: wealthfolio
+  repo: wealthfolio
+  releaseType: draft
+
+protocols:
+  - name: Wealthfolio deep links
+    schemes:
+      - wealthfolio
+
+mac:
+  category: public.app-category.finance
+  icon: ../../assets/brand/app-icon.icns
+  minimumSystemVersion: "10.13"
+  target:
+    - dmg
+    - zip
+
+win:
+  icon: ../../assets/brand/app-icon.ico
+  target:
+    - nsis
+
+linux:
+  category: Finance
+  icon: ../../assets/brand/icon.png
+  target:
+    - AppImage
+    - deb
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

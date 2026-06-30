@@ -1,7 +1,7 @@
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-/// Canonical event names shared with the desktop (Tauri) runtime.
+/// Canonical event names shared with the desktop runtime.
 pub const MARKET_SYNC_START: &str = "market:sync-start";
 pub const MARKET_SYNC_COMPLETE: &str = "market:sync-complete";
 pub const MARKET_SYNC_ERROR: &str = "market:sync-error";

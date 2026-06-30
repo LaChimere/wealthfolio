@@ -137,8 +137,8 @@ async function createAddon(name, options) {
     info(`  └── README.md               # Documentation`);
     info(`Next steps:`);
     info(`  1. cd ${addonId}`);
-    info(`  2. pnpm install`);
-    info(`  3. pnpm run dev:server`);
+    info(`  2. bun install`);
+    info(`  3. bun run dev:server`);
   } catch (err) {
     error(`Failed to create addon: ${err.message}`);
   }
@@ -187,13 +187,17 @@ async function buildAddon() {
     const packageJsonPath = path.resolve(process.cwd(), "package.json");
     if (!fs.existsSync(packageJsonPath)) {
       error("No package.json found. Are you in an addon directory?");
-      return;
+      process.exitCode = 1;
+      return false;
     }
 
-    await execAsync("pnpm run build");
+    await execAsync("bun run build");
     success("Addon built successfully!");
+    return true;
   } catch (err) {
     error(`Build failed: ${err.message}`);
+    process.exitCode = 1;
+    return false;
   }
 }
 
@@ -203,13 +207,17 @@ async function packageAddon() {
     info("Packaging addon...");
 
     // Build first
-    await buildAddon();
+    const buildSucceeded = await buildAddon();
+    if (!buildSucceeded) {
+      return;
+    }
 
     // Create package
-    await execAsync("pnpm run package");
+    await execAsync("bun run package");
     success("Addon packaged successfully!");
   } catch (err) {
     error(`Packaging failed: ${err.message}`);
+    process.exitCode = 1;
   }
 }
 
@@ -231,7 +239,7 @@ async function testSetup() {
     // Check if dist exists
     const distPath = path.resolve(process.cwd(), "dist");
     if (!fs.existsSync(distPath)) {
-      warn("⚠️  No dist directory found. Run `pnpm run build` first.");
+      warn("⚠️  No dist directory found. Run `bun run build` first.");
     } else {
       success("✅ Dist directory exists");
     }
@@ -246,11 +254,11 @@ async function testSetup() {
       }
     } catch (error) {
       warn("⚠️  Development server not running on port 3001");
-      info("   Start it with: pnpm run dev:server");
+      info("   Start it with: bun run dev:server");
     }
 
     info("\nNext steps:");
-    info("1. Start dev server: pnpm run dev:server");
+    info("1. Start dev server: bun run dev:server");
     info("2. Start main app in dev mode");
     info("3. Check console: discoverAddons()");
   } catch (err) {

@@ -11,9 +11,9 @@ import type { AppInfo, PlatformInfo } from "../types";
 export const getSettings = async (): Promise<Settings> => {
   try {
     return await invoke<Settings>("get_settings");
-  } catch (_error) {
+  } catch (error) {
     logger.error("Error fetching settings.");
-    return {} as Settings;
+    throw error;
   }
 };
 
@@ -29,9 +29,9 @@ export const updateSettings = async (settingsUpdate: Partial<Settings>): Promise
 export const isAutoUpdateCheckEnabled = async (): Promise<boolean> => {
   try {
     return await invoke<boolean>("is_auto_update_check_enabled");
-  } catch (_error) {
+  } catch (error) {
     logger.error("Error checking auto-update setting.");
-    return true; // Default to enabled
+    throw error;
   }
 };
 
@@ -72,7 +72,7 @@ export const getDatabaseBackupDownloadUrl = (filename: string): string =>
   `${API_PREFIX}/utilities/database/backups/${encodeURIComponent(filename)}/download`;
 
 export const backupDatabaseToPath = (_backupDir: string): Promise<string> =>
-  Promise.reject(new Error("Backing up to a local path is only supported in the Tauri app"));
+  Promise.reject(new Error("Backing up to a local path is only supported in the desktop app"));
 
 export interface PendingExport {
   relativePath: string;
@@ -80,7 +80,7 @@ export interface PendingExport {
 }
 
 export const backupDatabaseToPendingExport = (): Promise<PendingExport> =>
-  Promise.reject(new Error("Pending backup exports are only supported in the Tauri app"));
+  Promise.reject(new Error("Pending backup exports are only supported in a native app"));
 
 export const restoreDatabase = (_backupFilePath: string): Promise<void> =>
   Promise.reject(
@@ -94,14 +94,9 @@ export const restoreDatabase = (_backupFilePath: string): Promise<void> =>
 export const getAppInfo = async (): Promise<AppInfo> => {
   try {
     return await invoke<AppInfo>("get_app_info");
-  } catch (err) {
-    logger.error("Error fetching app info");
-    console.error(err);
-    return {
-      version: "",
-      dbPath: "",
-      logsDir: "",
-    };
+  } catch (error) {
+    logger.error("Error fetching app info.");
+    throw error;
   }
 };
 
@@ -133,9 +128,10 @@ export const checkForUpdates = async (options?: {
   if (!response?.updateAvailable) {
     return null;
   }
+  const appInfo = await getAppInfo();
   // Convert web response to UpdateInfo shape
   return {
-    currentVersion: "",
+    currentVersion: appInfo.version,
     latestVersion: response.latestVersion,
     notes: response.notes,
     pubDate: response.pubDate,
@@ -190,7 +186,6 @@ export const getPlatform = (): Promise<PlatformInfo> => {
     os,
     is_mobile,
     is_desktop: !is_mobile,
-    is_tauri: false,
     capabilities: {
       connect_sync: true,
       device_sync: true,

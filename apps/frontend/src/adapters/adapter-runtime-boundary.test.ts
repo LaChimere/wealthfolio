@@ -1,0 +1,91 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const frontendSrcDir = path.resolve(currentDir, "..");
+const repoRoot = path.resolve(currentDir, "../../../..");
+const electronAdapterDir = path.join(frontendSrcDir, "adapters/electron");
+
+const IMPORT_RE =
+  /(?:from\s+['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s+['"]([^'"]+)['"])/g;
+const TAURI_SPECIFIER_RE = /^(@tauri-apps\/|tauri-plugin-|@\/adapters\/tauri(?:\/|$))/;
+const ELECTRON_SPECIFIER_RE = /^@wealthfolio\/electron(?:\/|$)/;
+
+const ALLOWED_NON_ADAPTER_ELECTRON_IMPORTS: Record<string, string[]> = {
+  "apps/frontend/src/types/global.d.ts": ["@wealthfolio/electron/shared/ipc"],
+};
+
+function collectSourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      return collectSourceFiles(entryPath);
+    }
+    return /\.(ts|tsx)$/.test(entry.name) && !/\.(test|spec)\.(ts|tsx)$/.test(entry.name)
+      ? [entryPath]
+      : [];
+  });
+}
+
+function collectImports(files: string[], specifierRe: RegExp): Record<string, string[]> {
+  const importsByFile = new Map<string, Set<string>>();
+
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    for (const match of source.matchAll(IMPORT_RE)) {
+      const specifier = match[1] ?? match[2] ?? match[3];
+      if (!specifier || !specifierRe.test(specifier)) {
+        continue;
+      }
+
+      const relativePath = path.relative(repoRoot, file).split(path.sep).join("/");
+      const imports = importsByFile.get(relativePath) ?? new Set<string>();
+      imports.add(specifier);
+      importsByFile.set(relativePath, imports);
+    }
+  }
+
+  return Object.fromEntries(
+    [...importsByFile.entries()]
+      .map(([file, imports]) => [file, [...imports].sort()] as const)
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function collectImportsOutsideAdapter(
+  files: string[],
+  adapterDir: string,
+  specifierRe: RegExp,
+): Record<string, string[]> {
+  return collectImports(
+    files.filter((file) => {
+      const relativeToAdapter = path.relative(adapterDir, file);
+      return (
+        relativeToAdapter === ".." ||
+        relativeToAdapter.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativeToAdapter)
+      );
+    }),
+    specifierRe,
+  );
+}
+
+describe("adapter runtime boundary", () => {
+  it("keeps Tauri imports out of the frontend runtime", () => {
+    const actual = collectImports(collectSourceFiles(frontendSrcDir), TAURI_SPECIFIER_RE);
+
+    expect(actual).toEqual({});
+  });
+
+  it("keeps Electron IPC imports inside the Electron adapter seam", () => {
+    const actual = collectImportsOutsideAdapter(
+      collectSourceFiles(frontendSrcDir),
+      electronAdapterDir,
+      ELECTRON_SPECIFIER_RE,
+    );
+
+    expect(actual).toEqual(ALLOWED_NON_ADAPTER_ELECTRON_IMPORTS);
+  });
+});

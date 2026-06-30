@@ -44,7 +44,7 @@ export function ApplicationHeader({
             </Button>
           )
         ) : null}
-        <div data-tauri-drag-region="true" className="draggable flex items-center space-x-4">
+        <div data-desktop-drag-region="true" className="draggable flex items-center space-x-4">
           {headingPrefix && (
             <>
               <h1 className="font-heading text-muted-foreground text-xl font-bold tracking-tight md:text-2xl">

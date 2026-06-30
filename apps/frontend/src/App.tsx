@@ -4,29 +4,24 @@ import { WealthfolioConnectProvider } from "@/features/wealthfolio-connect";
 import { SettingsProvider } from "@/lib/settings-provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@wealthfolio/ui";
-import { useState } from "react";
+import { setAddonHostQueryClient } from "./addons/addons-runtime-context";
 import { PrivacyProvider } from "./context/privacy-context";
 import { LoginPage } from "./pages/auth/login-page";
 import { AppRoutes } from "./routes";
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+    },
+  },
+});
+setAddonHostQueryClient(queryClient);
+
 function App() {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            refetchOnWindowFocus: false,
-            staleTime: 5 * 60 * 1000,
-            retry: false,
-          },
-        },
-      }),
-  );
-
   const isWebEnv = isWeb;
-
-  // Make QueryClient available globally for addons
-  window.__wealthfolio_query_client__ = queryClient;
 
   const routedContent = isWebEnv ? (
     <AuthGate fallback={<LoginPage />}>

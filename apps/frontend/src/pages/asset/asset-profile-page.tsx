@@ -1022,7 +1022,7 @@ export const AssetProfilePage = () => {
           </div>
         }
       >
-        <div className="flex items-center gap-2" data-tauri-drag-region="true">
+        <div className="flex items-center gap-2" data-desktop-drag-region="true">
           {isAltAsset && altHolding ? (
             <div className="bg-muted flex h-9 w-9 items-center justify-center rounded-full">
               <AlternativeAssetIcon kind={altHolding.kind} size={20} />

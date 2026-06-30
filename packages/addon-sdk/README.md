@@ -107,8 +107,8 @@ npm install @wealthfolio/addon-sdk @tanstack/react-query
 # Using yarn
 yarn add @wealthfolio/addon-sdk @tanstack/react-query
 
-# Using pnpm
-pnpm add @wealthfolio/addon-sdk @tanstack/react-query
+# Using Bun
+bun add @wealthfolio/addon-sdk @tanstack/react-query
 ```
 
 ### Requirements
@@ -184,7 +184,7 @@ Create a `manifest.json` file in your addon root:
   "homepage": "https://github.com/yourname/investment-fees-tracker",
   "license": "MIT",
   "main": "dist/addon.js",
-  "sdkVersion": "1.0.0",
+  "sdkVersion": "3.4.0",
   "minWealthfolioVersion": "1.0.0",
   "keywords": ["portfolio", "fees", "tracking", "analytics"],
   "icon": "data:image/svg+xml;base64,...",
@@ -791,8 +791,8 @@ ctx.api.logger.debug('Debug info:', debugData);
 | `query.getClient()`                             | Get shared QueryClient instance                           | None                 |
 
 > Tip: `activities.getAll` accepts an optional account ID string to scope
-> results to a single account. The SDK normalizes this for both desktop (Tauri)
-> and web runtimes—no need to wrap it in an array.
+> results to a single account. The SDK normalizes this for both desktop and web
+> runtimes—no need to wrap it in an array.
 
 ### Activity search filters
 
@@ -1045,13 +1045,13 @@ git clone https://github.com/wealthfolio/wealthfolio.git
 cd wealthfolio/packages/addon-sdk
 
 # Install dependencies
-pnpm install
+bun install
 
 # Build the SDK
-pnpm build
+bun run build
 
 # Watch for changes during development
-pnpm dev
+bun run dev
 ```
 
 #### 2. SDK Build Process
@@ -1080,7 +1080,7 @@ export default defineConfig({
 
 ```bash
 # Build the SDK
-pnpm build
+bun run build
 
 # Link for local testing
 npm link
@@ -1282,20 +1282,20 @@ We welcome contributions to improve the addon SDK!
 2. **Install Dependencies**
 
    ```bash
-   pnpm install
+   bun install
    ```
 
 3. **Make Changes**
 
    ```bash
    # Start development mode
-   pnpm dev
+   bun run dev
 
    # Run type checking
-   pnpm lint
+   bun run type-check
 
    # Build for testing
-   pnpm build
+   bun run build
    ```
 
 4. **Testing Your Changes**

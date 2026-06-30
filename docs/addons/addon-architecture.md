@@ -101,7 +101,7 @@ const accounts = await ctx.api.accounts.getAll();
 // Detected: accounts.getAll
 ```
 
-The Rust backend scans for patterns like:
+The backend scans for patterns like:
 
 - `ctx.api.accounts.getAll(`
 - `api.accounts.getAll(`
@@ -125,23 +125,23 @@ The Rust backend scans for patterns like:
 
 Based on the actual code, these are the permission categories:
 
-| Category              | Functions                                   | Risk Level |
-| --------------------- | ------------------------------------------- | ---------- |
-| `accounts`            | getAll, create                              | High       |
-| `portfolio`           | getHoldings, update, recalculate            | High       |
-| `activities`          | getAll, search, create, update, import      | High       |
-| `market-data`         | searchTicker, sync, getProviders            | Low        |
-| `assets`              | getProfile, updateProfile, updateDataSource | Medium     |
-| `quotes`              | update, getHistory                          | Low        |
-| `performance`         | calculateHistory, calculateSummary          | Medium     |
-| `currency`            | getAll, update, add                         | Low        |
-| `goals`               | getAll, create, update, updateAllocations   | Medium     |
-| `contribution-limits` | getAll, create, update, calculateDeposits   | Medium     |
-| `settings`            | get, update, backupDatabase                 | Medium     |
-| `files`               | openCsvDialog, openSaveDialog               | Medium     |
-| `events`              | onDrop, onUpdateComplete, onSyncStart       | Low        |
-| `ui`                  | sidebar.addItem, router.add                 | Low        |
-| `secrets`             | set, get, delete                            | High       |
+| Category                       | Functions                                   | Risk Level |
+| ------------------------------ | ------------------------------------------- | ---------- |
+| `accounts`                     | getAll, create                              | High       |
+| `portfolio`                    | getHoldings, update, recalculate            | High       |
+| `activities`                   | getAll, search, create, update, import      | High       |
+| `market-data`                  | searchTicker, sync, getProviders            | Low        |
+| `assets`                       | getProfile, updateProfile, updateDataSource | Medium     |
+| `quotes`                       | update, getHistory                          | Low        |
+| `performance`                  | calculateHistory, calculateSummary          | Medium     |
+| `currency` / `exchangeRates`   | getAll, update, add                         | Low        |
+| `financial-planning` / `goals` | getAll, create, update, getFunding          | Medium     |
+| `contribution-limits`          | getAll, create, update, calculateDeposits   | Medium     |
+| `settings`                     | get, update, backupDatabase                 | Medium     |
+| `files`                        | openCsvDialog, openSaveDialog               | Medium     |
+| `events`                       | onDrop, onUpdateComplete, onSyncStart       | Low        |
+| `ui`                           | sidebar.addItem, router.add                 | Low        |
+| `secrets`                      | set, get, delete                            | High       |
 
 ### Permission Enforcement
 
@@ -151,6 +151,18 @@ The permission system works in three stages:
 2. **Declaration Matching**: Detected usage is compared with manifest
    declarations
 3. **Runtime Validation**: API calls are checked against approved permissions
+
+Runtime validation is enforced at the addon context boundary. Domain APIs under
+`ctx.api` are wrapped by the SDK type bridge, while `ctx.sidebar.addItem`,
+`ctx.router.add`, and scoped `ctx.api.secrets.*` calls are guarded in the addon
+context factory. Installed addons with an explicit empty permission list fail
+closed for guarded APIs; legacy/dev contexts that do not provide permission
+metadata remain unrestricted for compatibility.
+
+Logger, navigation, toast, and React Query helper APIs are still compatibility
+utilities rather than a complete browser sandbox. In particular,
+`ctx.api.query.getClient()` can expose host query-cache data and should be
+treated as a remaining hardening target.
 
 ### Secrets Scoping
 

@@ -388,9 +388,6 @@ export function ConnectedView() {
   // Sync runs in background, global event listener handles toasts and query invalidation
   const syncToLocalMutation = useMutation({
     mutationFn: syncBrokerData,
-    onSuccess: () => {
-      toast.loading("Syncing broker data...", { id: "broker-sync-start" });
-    },
     onError: (error) => {
       toast.error(
         `Failed to start sync: ${error instanceof Error ? error.message : "Unknown error"}`,

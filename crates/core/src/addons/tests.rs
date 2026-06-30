@@ -22,6 +22,42 @@ fn build_test_addon_zip(entries: &[(&str, &str)]) -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn build_test_addon_zip_with_many_entries(entry_count: usize) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = SimpleFileOptions::default();
+        for index in 0..entry_count {
+            zip.start_file(format!("file{}.txt", index), options)
+                .expect("failed to start zip file");
+            zip.write_all(b"x").expect("failed to write zip file");
+        }
+        zip.finish().expect("failed to finish zip");
+    }
+    cursor.into_inner()
+}
+
+fn build_test_addon_zip_with_large_entry(uncompressed_bytes: usize) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("large.txt", options)
+            .expect("failed to start zip file");
+        let chunk = vec![b'x'; 1024 * 1024];
+        let mut remaining = uncompressed_bytes;
+        while remaining > 0 {
+            let count = remaining.min(chunk.len());
+            zip.write_all(&chunk[..count])
+                .expect("failed to write zip file");
+            remaining -= count;
+        }
+        zip.finish().expect("failed to finish zip");
+    }
+    cursor.into_inner()
+}
+
 #[test]
 fn test_detect_addon_permissions_hello_world() {
     // Test with actual hello world addon content
@@ -138,6 +174,8 @@ fn test_detect_addon_permissions() {
                 function helper() {
                     return ctx.api.market.searchTicker('AAPL');
                 }
+                ctx.api.events.market.onSyncError(() => {});
+                ctx.api.query.invalidateQueries(['holdings']);
             "#
             .to_string(),
             is_main: false,
@@ -213,6 +251,40 @@ fn test_detect_addon_permissions() {
     assert!(
         market_functions.contains(&"searchTicker"),
         "searchTicker should be detected"
+    );
+
+    let events_permission = detected_permissions.iter().find(|p| p.category == "events");
+    assert!(
+        events_permission.is_some(),
+        "Events permissions should be detected"
+    );
+
+    let events_permission = events_permission.unwrap();
+    let event_functions: Vec<&str> = events_permission
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        event_functions.contains(&"onSyncError"),
+        "onSyncError should be detected"
+    );
+
+    let query_permission = detected_permissions.iter().find(|p| p.category == "query");
+    assert!(
+        query_permission.is_some(),
+        "Query permissions should be detected"
+    );
+
+    let query_permission = query_permission.unwrap();
+    let query_functions: Vec<&str> = query_permission
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        query_functions.contains(&"invalidateQueries"),
+        "invalidateQueries should be detected"
     );
 }
 
@@ -629,6 +701,28 @@ fn test_parse_manifest_json_metadata_service() {
     assert_eq!(permissions[0].functions[0].name, "showNotification");
     assert!(permissions[0].functions[0].is_declared);
     assert!(!permissions[0].functions[0].is_detected);
+}
+
+#[test]
+fn test_extract_addon_zip_rejects_too_many_entries() {
+    let zip_data = build_test_addon_zip_with_many_entries(MAX_ADDON_ZIP_ENTRIES + 1);
+
+    let err = match extract_addon_zip_internal(zip_data) {
+        Ok(_) => panic!("zip should be rejected"),
+        Err(err) => err,
+    };
+    assert!(err.contains("Addon ZIP contains too many entries"));
+}
+
+#[test]
+fn test_extract_addon_zip_rejects_oversized_uncompressed_content() {
+    let zip_data = build_test_addon_zip_with_large_entry(MAX_ADDON_UNCOMPRESSED_BYTES + 1);
+
+    let err = match extract_addon_zip_internal(zip_data) {
+        Ok(_) => panic!("zip should be rejected"),
+        Err(err) => err,
+    };
+    assert!(err.contains("Addon ZIP uncompressed size exceeds the supported limit"));
 }
 
 #[test]

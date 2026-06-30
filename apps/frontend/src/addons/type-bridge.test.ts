@@ -1,5 +1,40 @@
 import { vi, describe, it, expect } from "vitest";
-import { createSDKHostAPIBridge, type InternalHostAPI } from "./type-bridge";
+import {
+  buildAllowedAddonPermissionPaths,
+  createAddonPermissionGuard,
+  createSDKHostAPIBridge,
+  type InternalHostAPI,
+  type RuntimeAddonPermission,
+} from "./type-bridge";
+
+const goalProgressManifest = {
+  id: "goal-progress-tracker",
+  permissions: [
+    declaredPermission("accounts", ["getAll"]),
+    declaredPermission("portfolio", ["getLatestValuations"]),
+    declaredPermission("goals", ["getAll", "getFunding"]),
+  ],
+};
+
+const investmentFeesManifest = {
+  id: "investment-fees-tracker",
+  permissions: [
+    declaredPermission("exchangeRates", ["getAll"]),
+    declaredPermission("settings", ["get"]),
+  ],
+};
+
+function declaredPermission(category: string, functions: string[]): RuntimeAddonPermission {
+  return {
+    category,
+    purpose: "test",
+    functions: functions.map((name) => ({
+      name,
+      isDeclared: true,
+      isDetected: false,
+    })),
+  };
+}
 
 describe("Addon Type Bridge", () => {
   describe("createSDKHostAPIBridge", () => {
@@ -68,6 +103,243 @@ describe("Addon Type Bridge", () => {
 
       // Should fallback to default addon ID for empty string
       expect(mockLogInfo).toHaveBeenCalledWith("[unknown-addon] test message");
+    });
+
+    it("keeps bundled manifest permissions compatible with SDK API function names", async () => {
+      const getAccounts = vi.fn().mockResolvedValue([]);
+      const getLatestValuations = vi.fn().mockResolvedValue([]);
+      const getGoals = vi.fn().mockResolvedValue([]);
+      const getGoalFunding = vi.fn().mockResolvedValue([]);
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getAccounts,
+          getLatestValuations,
+          getGoals,
+          getGoalFunding,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        goalProgressManifest.id,
+        createAddonPermissionGuard({
+          addonId: goalProgressManifest.id,
+          permissions: goalProgressManifest.permissions as RuntimeAddonPermission[],
+        }),
+      );
+
+      await expect(sdkAPI.accounts.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.portfolio.getLatestValuations([])).resolves.toEqual([]);
+      await expect(sdkAPI.goals.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.goals.getFunding("goal-id")).resolves.toEqual([]);
+
+      expect(getAccounts).toHaveBeenCalledOnce();
+      expect(getLatestValuations).toHaveBeenCalledWith([]);
+      expect(getGoals).toHaveBeenCalledOnce();
+      expect(getGoalFunding).toHaveBeenCalledWith("goal-id");
+    });
+
+    it("supports exchangeRates category declarations from bundled manifests", async () => {
+      const getExchangeRates = vi.fn().mockResolvedValue([]);
+      const getSettings = vi.fn().mockResolvedValue({});
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getExchangeRates,
+          getSettings,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        investmentFeesManifest.id,
+        createAddonPermissionGuard({
+          addonId: investmentFeesManifest.id,
+          permissions: investmentFeesManifest.permissions as RuntimeAddonPermission[],
+        }),
+      );
+
+      await expect(sdkAPI.exchangeRates.getAll()).resolves.toEqual([]);
+      await expect(sdkAPI.settings.get()).resolves.toEqual({});
+
+      expect(getExchangeRates).toHaveBeenCalledOnce();
+      expect(getSettings).toHaveBeenCalledOnce();
+    });
+
+    it("blocks undeclared SDK API calls without invoking the host adapter", () => {
+      const getAccounts = vi.fn().mockResolvedValue([]);
+      const createActivity = vi.fn();
+      const warn = vi.fn();
+
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          getAccounts,
+          createActivity,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "secure-addon",
+        createAddonPermissionGuard({
+          addonId: "secure-addon",
+          permissions: [declaredPermission("accounts", ["getAll"])],
+          onDenied: warn,
+        }),
+      );
+
+      expect(() =>
+        sdkAPI.activities.create({} as Parameters<typeof sdkAPI.activities.create>[0]),
+      ).toThrow("Addon secure-addon is not permitted to call api.activities.create");
+      expect(createActivity).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "Addon secure-addon is not permitted to call api.activities.create",
+      );
+    });
+
+    it("maps UI and secrets permissions to context and scoped secret calls", () => {
+      const guard = createAddonPermissionGuard({
+        addonId: "ui-addon",
+        permissions: [
+          declaredPermission("ui", ["sidebar.addItem"]),
+          declaredPermission("secrets", ["get"]),
+        ],
+      });
+
+      expect(() => guard.assertAllowed("context.sidebar.addItem")).not.toThrow();
+      expect(() => guard.assertAllowed("api.secrets.get")).not.toThrow();
+      expect(() => guard.assertAllowed("context.router.add")).toThrow(
+        "Addon ui-addon is not permitted to call context.router.add",
+      );
+      expect(() => guard.assertAllowed("api.secrets.set")).toThrow(
+        "Addon ui-addon is not permitted to call api.secrets.set",
+      );
+    });
+
+    it("guards query cache APIs behind query permissions", () => {
+      const facadeInvalidateQueries = vi.fn();
+      const facadeRefetchQueries = vi.fn();
+      const getQueryClient = vi.fn(() => ({
+        invalidateQueries: facadeInvalidateQueries,
+        refetchQueries: facadeRefetchQueries,
+      }));
+      const invalidateQueries = vi.fn();
+      const refetchQueries = vi.fn();
+      const warn = vi.fn();
+
+      const blockedApi = createSDKHostAPIBridge(
+        {
+          getQueryClient,
+          invalidateQueries,
+          refetchQueries,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "query-addon",
+        createAddonPermissionGuard({
+          addonId: "query-addon",
+          permissions: [],
+          onDenied: warn,
+        }),
+      );
+
+      expect(() => blockedApi.query.getClient()).toThrow(
+        "Addon query-addon is not permitted to call api.query.getClient",
+      );
+      expect(() => blockedApi.query.invalidateQueries("accounts")).toThrow(
+        "Addon query-addon is not permitted to call api.query.invalidateQueries",
+      );
+      expect(() => blockedApi.query.refetchQueries(["holdings"])).toThrow(
+        "Addon query-addon is not permitted to call api.query.refetchQueries",
+      );
+      expect(getQueryClient).not.toHaveBeenCalled();
+      expect(invalidateQueries).not.toHaveBeenCalled();
+      expect(refetchQueries).not.toHaveBeenCalled();
+
+      const allowedApi = createSDKHostAPIBridge(
+        {
+          getQueryClient,
+          invalidateQueries,
+          refetchQueries,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "query-addon",
+        createAddonPermissionGuard({
+          addonId: "query-addon",
+          permissions: [
+            declaredPermission("query", ["getClient", "invalidateQueries", "refetchQueries"]),
+          ],
+        }),
+      );
+
+      const queryClient = allowedApi.query.getClient();
+      queryClient?.invalidateQueries("accounts");
+      queryClient?.refetchQueries(["holdings"]);
+      allowedApi.query.invalidateQueries("accounts");
+      allowedApi.query.refetchQueries(["holdings"]);
+
+      expect(getQueryClient).toHaveBeenCalledOnce();
+      expect(facadeInvalidateQueries).toHaveBeenCalledWith("accounts");
+      expect(facadeRefetchQueries).toHaveBeenCalledWith(["holdings"]);
+      expect(invalidateQueries).toHaveBeenCalledWith("accounts");
+      expect(refetchQueries).toHaveBeenCalledWith(["holdings"]);
+    });
+
+    it("passes market sync completion payloads through permitted add-on event APIs", async () => {
+      const listenMarketSyncComplete = vi.fn().mockResolvedValue(vi.fn());
+      const listenMarketSyncError = vi.fn().mockResolvedValue(vi.fn());
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          listenMarketSyncComplete,
+          listenMarketSyncError,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "market-addon",
+        createAddonPermissionGuard({
+          addonId: "market-addon",
+          permissions: [declaredPermission("events.market", ["onSyncComplete", "onSyncError"])],
+        }),
+      );
+      const handler = vi.fn();
+      const errorHandler = vi.fn();
+
+      await sdkAPI.events.market.onSyncComplete(handler);
+      await sdkAPI.events.market.onSyncError(errorHandler);
+      expect(listenMarketSyncComplete).toHaveBeenCalledWith(handler);
+      expect(listenMarketSyncError).toHaveBeenCalledWith(errorHandler);
+
+      const marketPayload = {
+        failed_syncs: [["BAD", "Symbol not found: BAD"]],
+        skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+      };
+      const bridgeHandler = listenMarketSyncComplete.mock.calls[0]?.[0] as (event: unknown) => void;
+      bridgeHandler({
+        event: "market:sync-complete",
+        id: 1,
+        payload: marketPayload,
+      });
+
+      expect(handler).toHaveBeenCalledWith({
+        event: "market:sync-complete",
+        id: 1,
+        payload: marketPayload,
+      });
+
+      const errorBridgeHandler = listenMarketSyncError.mock.calls[0]?.[0] as (
+        event: unknown,
+      ) => void;
+      errorBridgeHandler({
+        event: "market:sync-error",
+        id: 2,
+        payload: "Provider unavailable",
+      });
+
+      expect(errorHandler).toHaveBeenCalledWith({
+        event: "market:sync-error",
+        id: 2,
+        payload: "Provider unavailable",
+      });
+    });
+
+    it("ignores permission functions that were neither declared nor detected", () => {
+      const allowedPaths = buildAllowedAddonPermissionPaths([
+        {
+          category: "activities",
+          purpose: "test",
+          functions: [
+            { name: "create", isDeclared: false, isDetected: false },
+            { name: "search", isDeclared: false, isDetected: true },
+          ],
+        },
+      ]);
+
+      expect(allowedPaths.has("api.activities.create")).toBe(false);
+      expect(allowedPaths.has("api.activities.search")).toBe(true);
     });
   });
 });

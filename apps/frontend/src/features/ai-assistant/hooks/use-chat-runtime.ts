@@ -18,7 +18,14 @@ import { useMemo, useCallback, useRef, useState } from "react";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 
 import { streamChatResponse, type ChatModelConfig } from "../api";
-import type { AiMessageAttachment, AiThread, ChatMessage, ChatThread, ThreadPage } from "../types";
+import {
+  parseErrorCode,
+  type AiMessageAttachment,
+  type AiThread,
+  type ChatMessage,
+  type ChatThread,
+  type ThreadPage,
+} from "../types";
 import { QueryKeys } from "@/lib/query-keys";
 import { generateId } from "@/lib/id";
 import { AI_THREADS_KEY } from "./use-threads";
@@ -797,10 +804,11 @@ export function useChatRuntime(config?: ChatModelConfig) {
 
             case "error":
               console.error("Stream error:", event.message);
+              const parsedError = parseErrorCode(event.code, event.message);
               // Show formatted error to user in the assistant message
               streamParts.push({
                 type: "text",
-                content: formatErrorMessage(event.message),
+                content: parsedError.message,
               });
               updateAssistantMessage();
               break;

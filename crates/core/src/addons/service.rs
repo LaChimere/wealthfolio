@@ -9,6 +9,8 @@ use super::models::*;
 
 // Constants
 pub const ADDON_STORE_API_BASE_URL: &str = "https://wealthfolio.app/api/addons";
+pub const MAX_ADDON_ZIP_ENTRIES: usize = 10_000;
+pub const MAX_ADDON_UNCOMPRESSED_BYTES: usize = 50 * 1024 * 1024;
 
 /// Helper function to create a request with common headers
 fn create_request_with_headers(
@@ -239,6 +241,11 @@ pub fn detect_addon_permissions(addon_files: &[AddonFile]) -> Vec<AddonPermissio
             "Access to file dialogs",
         ),
         (
+            "query",
+            vec!["getClient", "invalidateQueries", "refetchQueries"],
+            "Access to invalidate or refetch application query cache entries",
+        ),
+        (
             "events",
             vec![
                 // Import events
@@ -252,6 +259,7 @@ pub fn detect_addon_permissions(addon_files: &[AddonFile]) -> Vec<AddonPermissio
                 // Market events
                 "onSyncStart",
                 "onSyncComplete",
+                "onSyncError",
             ],
             "Access to application events",
         ),
@@ -485,18 +493,40 @@ pub fn extract_addon_zip_internal(zip_data: Vec<u8>) -> Result<ExtractedAddon, S
     let mut manifest_json: Option<String> = None;
     let mut main_file: Option<String> = None;
 
-    // Extract all files from ZIP
+    if archive.len() > MAX_ADDON_ZIP_ENTRIES {
+        return Err(format!(
+            "Addon ZIP contains too many entries: {}",
+            archive.len()
+        ));
+    }
+
+    // Validate declared uncompressed sizes before reading any entry contents.
+    let mut entry_metadata = Vec::with_capacity(archive.len());
+    let mut total_uncompressed_bytes = 0usize;
     for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to access file {}: {}", i, e))?;
+        entry_metadata.push((file.name().to_string(), file.is_dir()));
+        let file_size = usize::try_from(file.size())
+            .map_err(|_| "Addon ZIP uncompressed size exceeds the supported limit".to_string())?;
+        total_uncompressed_bytes = total_uncompressed_bytes
+            .checked_add(file_size)
+            .ok_or_else(|| "Addon ZIP uncompressed size exceeds the supported limit".to_string())?;
+        if total_uncompressed_bytes > MAX_ADDON_UNCOMPRESSED_BYTES {
+            return Err("Addon ZIP uncompressed size exceeds the supported limit".to_string());
+        }
+    }
+
+    // Extract all files from ZIP
+    for (i, (file_name, is_dir)) in entry_metadata.into_iter().enumerate() {
+        if is_dir {
+            continue;
+        }
+        validated_addon_archive_path(&file_name)?;
         let mut file = archive
             .by_index(i)
             .map_err(|e| format!("Failed to access file {}: {}", i, e))?;
-
-        if file.is_dir() {
-            continue;
-        }
-
-        let file_name = file.name().to_string();
-        validated_addon_archive_path(&file_name)?;
         let mut contents = String::new();
 
         file.read_to_string(&mut contents)

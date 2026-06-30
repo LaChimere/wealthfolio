@@ -1,18 +1,23 @@
-Wealthfolio Server
+Wealthfolio legacy Rust server
 
 Overview
-- This crate runs the HTTP API (Axum) and serves static files for the web build.
-- It uses the shared `src-core` for all business logic, repositories, and migrations.
+- This crate contains the legacy Axum HTTP API implementation retained during the
+  TypeScript/Bun backend migration as a parity reference and compatibility
+  source.
+- Current local web, Docker, standalone prebuild, and packaged Electron runtime
+  paths use `apps/backend` instead of this crate.
+- The Rust server still uses the shared `crates/*` business logic, repositories,
+  and migrations when it is run explicitly for reference checks.
 
-Run locally (Rust only)
+Run locally for reference checks
 - From the repo root:
-  - `cargo run --manifest-path src-server/Cargo.toml`
+  - `cargo run --manifest-path apps/server/Cargo.toml`
 
 Docker image
-- Pull the latest published server image with `docker pull wealthfolio/wealthfolio:latest`.
-- Use that tag (or your locally built image) in the Docker run examples inside the root `README.md`.
+- Docker runtime images now launch the Bun TypeScript backend. Use the root
+  `README.md` Docker instructions for current self-hosted/web runtime usage.
 
-Key environment variables
+Key environment variables for the legacy Rust server
 - `WF_LISTEN_ADDR`: Bind address, default `127.0.0.1:8080`.
 - `WF_DB_PATH`: Path to the SQLite database file (or a directory; if a directory is provided, `app.db` is used inside it). Example: `./db/app.db`.
 - `WF_CORS_ALLOW_ORIGINS`: Comma-separated list of allowed origins for CORS. Example: `http://localhost:1420`.
@@ -33,10 +38,20 @@ Key environment variables
   For Docker Compose `.env`/`--env-file`, single-quote the value or double every `$`;
   for YAML inline values, double every `$` in the hash (`$$argon2id$$...`).
   When unset, authentication is disabled.
-- `WF_AUTH_TOKEN_TTL_MINUTES`: Optional JWT access token lifetime (minutes). Defaults to `60`.
-- `WF_SECRET_FILE`: Optional override for where encrypted secrets are stored. Defaults to `<data-root>/secrets.json`.
+- `WF_AUTH_TOKEN_TTL_MINUTES`: Optional JWT access token lifetime (minutes).
+  Defaults to `60`.
+- `WF_SECRET_BACKEND`: Optional secret-store backend. Use `file` for
+  web/self-hosted reference runs (default) or `keyring` for legacy desktop
+  sidecar builds compiled with the `keyring-backend` Cargo feature.
+- `WF_SECRET_FILE`: Optional override for where encrypted file-backed secrets
+  are stored. Defaults to `<data-root>/secrets.json`. Ignored when
+  `WF_SECRET_BACKEND=keyring`.
 
 Notes
-- The server also honors `DATABASE_URL`; when running in this workspace, `WF_DB_PATH` is preferred and propagated to `DATABASE_URL` internally so the core layer uses the expected path.
+- The server also honors `DATABASE_URL`; when running in this workspace,
+  `WF_DB_PATH` is preferred and propagated to `DATABASE_URL` internally so the
+  core layer uses the expected path.
 - Database migrations are embedded and applied automatically on startup.
-- Secrets in web/server mode are stored in an encrypted JSON file derived from the database directory using `WF_SECRET_KEY`.
+- Secrets in web/server mode are stored in an encrypted JSON file derived from
+  the database directory using `WF_SECRET_KEY`; legacy desktop sidecars can use
+  the OS keyring backend.

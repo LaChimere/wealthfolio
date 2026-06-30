@@ -642,6 +642,13 @@ export interface EventsAPI {
      * @returns Promise resolving to unlisten function
      */
     onSyncComplete<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
+
+    /**
+     * Listen for market sync error events
+     * @param handler Event handler
+     * @returns Promise resolving to unlisten function
+     */
+    onSyncError<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
   };
 }
 
@@ -690,12 +697,17 @@ export interface ToastAPI {
 /**
  * Query management APIs for React Query integration
  */
+export interface QueryCacheFacade {
+  invalidateQueries(queryKey: string | string[]): unknown;
+  refetchQueries(queryKey: string | string[]): unknown;
+}
+
 export interface QueryAPI {
   /**
-   * Get the shared QueryClient instance from the main application
-   * @returns The shared QueryClient instance
+   * Get a limited query cache facade from the main application
+   * @returns Cache helper facade with invalidate/refetch methods
    */
-  getClient(): unknown; // QueryClient from @tanstack/react-query
+  getClient(): QueryCacheFacade | undefined;
 
   /**
    * Invalidate queries by key

@@ -82,6 +82,13 @@ impl FxService {
                     .get_latest_exchange_rate_by_symbol(&inverse_key)?
                 {
                     Some(inverse_rate) => {
+                        if inverse_rate.rate.is_zero() {
+                            return Err(FxError::RateNotFound(format!(
+                                "Exchange rate not found for {}/{}",
+                                from, to
+                            ))
+                            .into());
+                        }
                         let direct_rate = ExchangeRate {
                             id: inverse_rate.id,
                             from_currency: from.to_string(),
@@ -204,7 +211,9 @@ impl FxServiceTrait for FxService {
             timestamp: Utc::now(),
         };
 
-        self.repository.save_exchange_rate(rate).await
+        let saved_rate = self.repository.save_exchange_rate(rate).await?;
+        self.initialize_converter()?;
+        Ok(saved_rate)
     }
 
     fn get_historical_rates(&self, from: &str, to: &str, days: i64) -> Result<Vec<ExchangeRate>> {
@@ -446,6 +455,8 @@ mod tests {
     #[derive(Default)]
     struct MockFxRepository {
         created_pairs: Mutex<Vec<(String, String, String)>>,
+        historical_rates: Mutex<Vec<ExchangeRate>>,
+        latest_by_symbol: Mutex<Option<ExchangeRate>>,
     }
 
     #[async_trait]
@@ -455,7 +466,7 @@ mod tests {
         }
 
         fn get_historical_exchange_rates(&self) -> Result<Vec<ExchangeRate>> {
-            Ok(vec![])
+            Ok(self.historical_rates.lock().unwrap().clone())
         }
 
         fn get_latest_exchange_rate(&self, _from: &str, _to: &str) -> Result<Option<ExchangeRate>> {
@@ -466,7 +477,7 @@ mod tests {
             &self,
             _symbol: &str,
         ) -> Result<Option<ExchangeRate>> {
-            Ok(None)
+            Ok(self.latest_by_symbol.lock().unwrap().clone())
         }
 
         fn get_historical_quotes(
@@ -489,6 +500,7 @@ mod tests {
         }
 
         async fn save_exchange_rate(&self, rate: ExchangeRate) -> Result<ExchangeRate> {
+            self.historical_rates.lock().unwrap().push(rate.clone());
             Ok(rate)
         }
 
@@ -528,6 +540,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn inverse_latest_rate_with_zero_value_returns_not_found() {
+        let repo = Arc::new(MockFxRepository::default());
+        *repo.latest_by_symbol.lock().unwrap() = Some(ExchangeRate {
+            id: "cad-usd".to_string(),
+            from_currency: "CAD".to_string(),
+            to_currency: "USD".to_string(),
+            rate: Decimal::ZERO,
+            source: DATA_SOURCE_MANUAL.to_string(),
+            timestamp: Utc::now(),
+        });
+        let service = FxService::new(repo);
+
+        let error = service.load_latest_exchange_rate("USD", "CAD").unwrap_err();
+
+        assert!(error.to_string().contains("Exchange rate not found"));
+    }
+
     #[tokio::test]
     async fn register_currency_pair_manual_skips_minor_major_same_currency_after_normalization() {
         let repo = Arc::new(MockFxRepository::default());
@@ -541,6 +571,40 @@ mod tests {
         assert!(
             repo.created_pairs.lock().unwrap().is_empty(),
             "GBp/GBP should not create a manual FX asset after normalization"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_exchange_rate_refreshes_initialized_converter() {
+        let repo = Arc::new(MockFxRepository::default());
+        repo.historical_rates.lock().unwrap().push(ExchangeRate {
+            id: "usd-cad".to_string(),
+            from_currency: "USD".to_string(),
+            to_currency: "CAD".to_string(),
+            rate: Decimal::new(12, 1),
+            source: DATA_SOURCE_MANUAL.to_string(),
+            timestamp: Utc::now() - chrono::Duration::days(1),
+        });
+        let service = FxService::new(repo);
+        service.initialize().unwrap();
+
+        assert_eq!(
+            service
+                .convert_currency(Decimal::new(10, 0), "USD", "CAD")
+                .unwrap(),
+            Decimal::new(12, 0)
+        );
+
+        service
+            .update_exchange_rate("USD", "CAD", Decimal::new(2, 0))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service
+                .convert_currency(Decimal::new(10, 0), "USD", "CAD")
+                .unwrap(),
+            Decimal::new(20, 0)
         );
     }
 

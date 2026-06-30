@@ -195,30 +195,67 @@ class AddonDevManager {
         );
       }
 
-      // Create a blob URL for the addon code
-      const blob = new Blob([code], { type: "text/javascript" });
-      const blobUrl = URL.createObjectURL(blob);
+      let blobUrl: string | null = null;
+      try {
+        // Create a blob URL for the addon code
+        const blob = new Blob([code], { type: "text/javascript" });
+        blobUrl = URL.createObjectURL(blob);
 
-      // Import and execute the addon
-      const mod = await import(/* @vite-ignore */ blobUrl);
+        // Import and execute the addon
+        const mod = await import(/* @vite-ignore */ blobUrl);
 
-      if (typeof mod.default === "function") {
-        // Create addon-specific context with scoped secrets
-        const addonSpecificContext = createAddonContext(addonId);
-        const addonInstance = mod.default(addonSpecificContext);
+        type EnableFn = ((ctx: ReturnType<typeof createAddonContext>) => unknown) | null;
+        const asRecord = mod as unknown as Record<string, unknown> & {
+          default?: unknown;
+        };
+        const defaultObj = asRecord.default as
+          | ((ctx: ReturnType<typeof createAddonContext>) => unknown)
+          | { enable?: (ctx: ReturnType<typeof createAddonContext>) => unknown }
+          | undefined;
+        const enableFunction: EnableFn =
+          (typeof defaultObj === "function" ? defaultObj : null) ??
+          (defaultObj &&
+          typeof (
+            defaultObj as { enable?: (ctx: ReturnType<typeof createAddonContext>) => unknown }
+          ).enable === "function"
+            ? (defaultObj as { enable: (ctx: ReturnType<typeof createAddonContext>) => unknown })
+                .enable
+            : null) ??
+          (typeof asRecord.enable === "function"
+            ? (asRecord.enable as (ctx: ReturnType<typeof createAddonContext>) => unknown)
+            : null) ??
+          (typeof asRecord.PortfolioTrackerAddon === "function"
+            ? (asRecord.PortfolioTrackerAddon as (
+                ctx: ReturnType<typeof createAddonContext>,
+              ) => unknown)
+            : null);
 
-        // Store for cleanup
-        if (addonInstance && typeof addonInstance.disable === "function") {
-          const g2 = globalThis as unknown as {
-            __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
-          };
-          g2.__DEV_ADDONS__ = g2.__DEV_ADDONS__ ?? new Map();
-          g2.__DEV_ADDONS__.set(addonId, addonInstance);
+        if (enableFunction) {
+          // Create addon-specific context with scoped secrets
+          const addonSpecificContext = createAddonContext(addonId);
+          const addonInstance = await enableFunction(addonSpecificContext);
+          const typedAddonInstance = addonInstance as { disable?: () => void } | undefined;
+
+          // Store for cleanup
+          if (typeof typedAddonInstance?.disable === "function") {
+            const g2 = globalThis as unknown as {
+              __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
+            };
+            g2.__DEV_ADDONS__ = g2.__DEV_ADDONS__ ?? new Map();
+            g2.__DEV_ADDONS__.set(addonId, typedAddonInstance);
+          }
+        } else {
+          throw new Error(
+            `Addon ${addonId} does not export a valid enable function. Available exports: ${Object.keys(
+              asRecord,
+            ).join(", ")}`,
+          );
+        }
+      } finally {
+        if (blobUrl) {
+          URL.revokeObjectURL(blobUrl);
         }
       }
-
-      // Cleanup blob URL
-      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       logger.error(`Failed to execute addon code for ${addonId}: ${error}`);
       throw error;

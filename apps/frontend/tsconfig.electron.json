@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/adapters": ["./src/adapters/electron"],
+      "@/adapters/*": ["./src/adapters/electron/*"],
+      "@wealthfolio/addon-sdk": ["../../packages/addon-sdk/src"],
+      "@wealthfolio/electron/shared/ipc": ["../electron/src/shared/ipc"],
+      "@wealthfolio/ui": ["../../packages/ui/src"],
+      "@wealthfolio/ui/*": ["../../packages/ui/src/*"],
+      "#platform": ["./src/adapters/electron/core"]
+    }
+  }
+}

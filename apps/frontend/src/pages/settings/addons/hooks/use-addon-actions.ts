@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@wealthfolio/ui/components/ui/use-toast";
 import {
-  isDesktop,
   logger as envLogger,
   installAddon,
   getInstalledAddons,
@@ -10,6 +9,7 @@ import {
   uninstallAddon,
   extractAddon,
   clearAddonStaging,
+  openAddonPackageDialog,
 } from "@/adapters";
 import type { InstalledAddon, Permission, ExtractedAddon } from "@/adapters";
 
@@ -77,64 +77,12 @@ export function useAddonActions() {
   const handleLoadAddon = async () => {
     try {
       setIsLoading(true);
-      if (isDesktop) {
-        // Dynamically import Tauri APIs in desktop to avoid bundling in web
-        const { open } = await import("@tauri-apps/plugin-dialog");
-        const { readFile } = await import("@tauri-apps/plugin-fs");
-
-        // Open file dialog for ZIP files only
-        const filePath = await open({
-          filters: [{ name: "Addon Packages", extensions: ["zip"] }],
-          multiple: false,
-        });
-
-        if (!filePath || Array.isArray(filePath)) {
-          return;
-        }
-
-        // Read the ZIP file (desktop)
-        const fileData = await readFile(filePath);
-        await handleInstallZipAddon(filePath, fileData);
+      const selectedPackage = await openAddonPackageDialog();
+      if (!selectedPackage) {
         return;
       }
 
-      // Web: use a hidden file input to pick a .zip and read it
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".zip,application/zip";
-      input.style.display = "none";
-
-      const filePromise = new Promise<File | null>((resolve) => {
-        input.onchange = () => {
-          const file = input.files && input.files[0] ? input.files[0] : null;
-          resolve(file);
-          // Cleanup
-          if (input.parentNode) {
-            input.parentNode.removeChild(input);
-          }
-        };
-        document.body.appendChild(input);
-        input.click();
-      });
-
-      const file = await filePromise;
-      if (!file) {
-        return;
-      }
-      // Ensure it's a zip by extension or MIME (best effort)
-      const isZip = file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip";
-      if (!isZip) {
-        toast({
-          title: "Invalid file type",
-          description: "Please select a .zip addon package.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const arrayBuffer = await file.arrayBuffer();
-      const fileData = new Uint8Array(arrayBuffer);
-      await handleInstallZipAddon(file.name, fileData);
+      await handleInstallZipAddon(selectedPackage.fileName, selectedPackage.data);
     } catch (error) {
       envLogger.error("Error loading addon: " + (error as Error).message);
       toast({

@@ -46,20 +46,23 @@ See the [README](README.md#getting-started) for detailed setup instructions.
 
 ### Optional Git Hooks
 
-Install the tracked Git hooks to run CI-equivalent checks before `git push`:
+Install the Lefthook-managed Git hooks to run the same checks used by the Bun
+tooling baseline:
 
 ```bash
-pnpm hooks:install
+bun run hooks:install
 ```
 
 Git does not enable repository hooks automatically, so each contributor must opt
-in once per clone.
+in once per clone. You can run the pre-commit hook manually with
+`bun run hooks:run`.
 
 ### Code Style
 
 - **Rust**: Follow standard Rust conventions, use `cargo fmt` and `cargo clippy`
-- **TypeScript/React**: Follow the existing code style, ESLint and Prettier are
-  configured
+- **TypeScript/React**: Follow the existing code style. ESLint and Prettier
+  remain the primary lint/format tools, with Biome added as a low-churn baseline
+  for workspace configuration files.
 - **Commits**: Write clear, concise commit messages
 
 ## Code of Conduct

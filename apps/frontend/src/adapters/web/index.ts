@@ -346,10 +346,13 @@ export {
   listenPortfolioUpdateComplete,
   listenPortfolioUpdateError,
   listenPortfolioUpdateStart,
+  listenUpdateAvailable,
+  listenUpdateDownloadProgress,
 } from "./events";
 
 // File Dialogs (web-specific implementations)
 export {
+  openAddonPackageDialog,
   openCsvFileDialog,
   openDatabaseFileDialog,
   openFileSaveDialog,
@@ -377,6 +380,13 @@ export {
 } from "./settings";
 export type { DatabaseBackup } from "./settings";
 
+export {
+  getWindowTheme,
+  listenWindowThemeChanged,
+  setWindowTheme,
+  toggleWindowFullscreen,
+} from "./window";
+
 // Addon Commands (web-specific implementations)
 export {
   checkAddonUpdate,
@@ -403,7 +413,7 @@ export {
   updateAddon,
 } from "./addons";
 
-// FIRE Planner (desktop-only — stubs throw at runtime)
+// FIRE Planner
 export {
   calculateRetirementProjection,
   runRetirementDecisionSensitivityMap,
@@ -413,7 +423,7 @@ export {
   runRetirementStressTests,
 } from "./fire-planner";
 
-// Crypto Commands (web stubs - not available in web mode)
+// Sync crypto commands
 export {
   syncComputeSas,
   syncComputeSharedSecret,

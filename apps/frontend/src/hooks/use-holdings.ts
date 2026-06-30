@@ -16,6 +16,7 @@ export function useHoldings(filter: AccountScope | string) {
     queryKey: [QueryKeys.HOLDINGS, accountFilter],
     queryFn: () => getHoldings(accountFilter),
     enabled: typeof filter === "string" ? !!filter : true,
+    refetchOnMount: "always",
   });
 
   return { holdings, isLoading, isError, error };

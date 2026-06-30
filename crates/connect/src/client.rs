@@ -1,7 +1,7 @@
 //! HTTP client for Wealthfolio Connect cloud API.
 //!
 //! This module provides a shared HTTP client for communicating with the
-//! Wealthfolio Connect cloud service. Both Tauri and server implementations
+//! Wealthfolio Connect cloud service. Both desktop and server implementations
 //! should use this client to ensure consistency.
 
 use async_trait::async_trait;

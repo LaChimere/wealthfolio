@@ -3,6 +3,7 @@ import {
   isDesktop,
   listenBrokerSyncComplete,
   listenBrokerSyncError,
+  listenBrokerSyncStart,
   listenDatabaseRestored,
   listenMarketSyncComplete,
   listenMarketSyncError,
@@ -182,6 +183,10 @@ const useGlobalEventListener = () => {
       });
     };
 
+    const handleBrokerSyncStart = () => {
+      toast.loading("Syncing broker data...", { id: TOAST_IDS.brokerSyncStart });
+    };
+
     const handleBrokerSyncComplete = (event: {
       payload: {
         success: boolean;
@@ -224,7 +229,9 @@ const useGlobalEventListener = () => {
             action: {
               label: "Review",
               onClick: () => {
-                navigateRef.current("/settings/accounts");
+                window.dispatchEvent(
+                  new CustomEvent("open-new-accounts-modal", { detail: newAccounts }),
+                );
               },
             },
             duration: Infinity, // Don't auto-dismiss - user must act or dismiss manually
@@ -277,6 +284,7 @@ const useGlobalEventListener = () => {
       const { error } = event.payload || { error: "Unknown error" };
       // Dismiss the loading toast
       toast.dismiss(TOAST_IDS.brokerSyncStart);
+      queryClientRef.current.invalidateQueries();
       toast.error("Broker Sync Failed", {
         description: error,
         duration: 10000,
@@ -297,6 +305,7 @@ const useGlobalEventListener = () => {
       const unlistenMarketComplete = await listenMarketSyncComplete(handleMarketSyncComplete);
       const unlistenMarketError = await listenMarketSyncError(handleMarketSyncError);
       const unlistenDatabaseRestored = await listenDatabaseRestored(handleDatabaseRestored);
+      const unlistenBrokerSyncStart = await listenBrokerSyncStart(handleBrokerSyncStart);
       const unlistenBrokerSyncComplete = await listenBrokerSyncComplete(handleBrokerSyncComplete);
       const unlistenBrokerSyncError = await listenBrokerSyncError(handleBrokerSyncError);
 
@@ -309,6 +318,7 @@ const useGlobalEventListener = () => {
         unlistenMarketError();
 
         unlistenDatabaseRestored();
+        unlistenBrokerSyncStart();
         unlistenBrokerSyncComplete();
         unlistenBrokerSyncError();
       };

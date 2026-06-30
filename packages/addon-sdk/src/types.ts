@@ -65,7 +65,7 @@ export interface RouterManager {
 }
 
 /**
- * Event callback type for Tauri events
+ * Event callback type for host events
  */
 export type EventCallback<T> = (event: { payload: T }) => void;
 

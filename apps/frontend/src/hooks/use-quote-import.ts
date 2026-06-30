@@ -128,7 +128,7 @@ export function useQuoteImport(): QuoteImportState & QuoteImportActions {
     try {
       setImportProgress(25);
 
-      // Simulate progress during import since Tauri command doesn't provide updates
+      // Simulate progress during import since the backend command doesn't provide updates.
       const progressInterval = setInterval(() => {
         setImportProgress((prev) => {
           const newProgress = prev + Math.random() * 10;

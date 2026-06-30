@@ -4,7 +4,7 @@
 import { notifyUnauthorized } from "@/lib/auth-token";
 import type { Logger } from "../types";
 
-/** True when running in the desktop (Tauri) environment */
+/** True when running in a desktop environment */
 export const isDesktop = false;
 
 /** True when running in the web environment */
@@ -41,8 +41,11 @@ export const COMMANDS: CommandMap = {
   get_app_info: { method: "GET", path: "/app/info" },
   check_update: { method: "GET", path: "/app/check-update" },
   backup_database: { method: "POST", path: "/utilities/database/backup" },
+  backup_database_to_path: { method: "POST", path: "/utilities/database/backup-to-path" },
   list_database_backups: { method: "GET", path: "/utilities/database/backups" },
   delete_database_backup: { method: "DELETE", path: "/utilities/database/backups" },
+  restore_database: { method: "POST", path: "/utilities/database/restore" },
+  export_data_file: { method: "GET", path: "/utilities/export" },
   get_holdings: { method: "POST", path: "/holdings/query" },
   get_holding: { method: "GET", path: "/holdings/item" },
   get_asset_holdings: { method: "GET", path: "/holdings/by-asset" },
@@ -110,6 +113,7 @@ export const COMMANDS: CommandMap = {
   // Activity import
   check_activities_import: { method: "POST", path: "/activities/import/check" },
   preview_import_assets: { method: "POST", path: "/activities/import/assets/preview" },
+  parse_csv: { method: "POST", path: "/activities/import/parse" },
   import_activities: { method: "POST", path: "/activities/import" },
   get_account_import_mapping: { method: "GET", path: "/activities/import/mapping" },
   save_account_import_mapping: { method: "POST", path: "/activities/import/mapping" },
@@ -266,6 +270,18 @@ export const COMMANDS: CommandMap = {
   enable_device_sync: { method: "POST", path: "/connect/device/enable" },
   clear_device_sync_data: { method: "DELETE", path: "/connect/device/sync-data" },
   reinitialize_device_sync: { method: "POST", path: "/connect/device/reinitialize" },
+  sync_generate_root_key: { method: "POST", path: "/sync/crypto/generate-root-key" },
+  sync_derive_dek: { method: "POST", path: "/sync/crypto/derive-dek" },
+  sync_generate_keypair: { method: "POST", path: "/sync/crypto/generate-keypair" },
+  sync_compute_shared_secret: { method: "POST", path: "/sync/crypto/compute-shared-secret" },
+  sync_derive_session_key: { method: "POST", path: "/sync/crypto/derive-session-key" },
+  sync_encrypt: { method: "POST", path: "/sync/crypto/encrypt" },
+  sync_decrypt: { method: "POST", path: "/sync/crypto/decrypt" },
+  sync_generate_pairing_code: { method: "POST", path: "/sync/crypto/generate-pairing-code" },
+  sync_hash_pairing_code: { method: "POST", path: "/sync/crypto/hash-pairing-code" },
+  sync_hmac_sha256: { method: "POST", path: "/sync/crypto/hmac-sha256" },
+  sync_compute_sas: { method: "POST", path: "/sync/crypto/compute-sas" },
+  sync_generate_device_id: { method: "POST", path: "/sync/crypto/generate-device-id" },
   device_sync_engine_status: { method: "GET", path: "/connect/device/engine-status" },
   device_sync_pairing_source_status: {
     method: "GET",
@@ -354,6 +370,20 @@ export function toBase64(data: Uint8Array | number[]): string {
   return btoa(binary);
 }
 
+function filenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(value);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1];
+  }
+  const bareMatch = /filename=([^;]+)/i.exec(value);
+  return bareMatch?.[1]?.trim() ?? null;
+}
+
 /**
  * Invoke a command via REST API (internal - use typed adapter functions instead)
  */
@@ -363,6 +393,7 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   let url = `${API_PREFIX}${config.path}`;
   let method = config.method;
   let body: BodyInit | undefined;
+  let jsonBody = true;
 
   switch (command) {
     case "update_account": {
@@ -402,6 +433,10 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       url += `/${encodeURIComponent(filename)}`;
       break;
     }
+    case "backup_database_to_path":
+      throw new Error("Backing up to a local path is only supported in the desktop app");
+    case "restore_database":
+      throw new Error("Restore in web mode requires stopping Wealthfolio and replacing app.db");
     case "update_settings": {
       const data = payload as { settingsUpdate: Record<string, unknown> };
       body = JSON.stringify(data.settingsUpdate);
@@ -593,6 +628,11 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       if (qs) url += `?${qs}`;
       break;
     }
+    case "export_data_file": {
+      const { data, format } = payload as { data: string; format: string };
+      url += `/${encodeURIComponent(data)}/${encodeURIComponent(format.toLowerCase())}`;
+      break;
+    }
     case "get_income_summary": {
       const p = payload as { filter?: { type: string; accountId?: string } };
       if (p?.filter?.type === "account" && p.filter.accountId) {
@@ -733,6 +773,32 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "preview_import_assets":
     case "import_activities": {
       body = JSON.stringify(payload);
+      break;
+    }
+    case "parse_csv": {
+      const { file, content, config } = payload as {
+        file?: Blob;
+        content?: number[] | Uint8Array | ArrayBuffer;
+        config: Record<string, unknown>;
+      };
+      const form = new FormData();
+      if (file instanceof Blob) {
+        const filename = typeof File !== "undefined" && file instanceof File ? file.name : "";
+        form.append("file", file, filename || "upload.csv");
+      } else {
+        const contentBytes =
+          content instanceof Uint8Array
+            ? content
+            : content instanceof ArrayBuffer
+              ? new Uint8Array(content)
+              : Uint8Array.from(content ?? []);
+        const contentBuffer = new ArrayBuffer(contentBytes.byteLength);
+        new Uint8Array(contentBuffer).set(contentBytes);
+        form.append("file", new Blob([contentBuffer]), "upload.csv");
+      }
+      form.append("config", new Blob([JSON.stringify(config)], { type: "application/json" }));
+      body = form;
+      jsonBody = false;
       break;
     }
     case "get_account_import_mapping": {
@@ -1199,6 +1265,52 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       body = reason ? JSON.stringify({ reason }) : JSON.stringify({});
       break;
     }
+    // Sync crypto commands
+    case "sync_generate_root_key":
+    case "sync_generate_keypair":
+    case "sync_generate_pairing_code":
+    case "sync_generate_device_id":
+      break;
+    case "sync_derive_dek": {
+      const { rootKey, version } = payload as { rootKey: string; version: number };
+      body = JSON.stringify({ rootKey, version });
+      break;
+    }
+    case "sync_compute_shared_secret": {
+      const { ourSecret, theirPublic } = payload as { ourSecret: string; theirPublic: string };
+      body = JSON.stringify({ ourSecret, theirPublic });
+      break;
+    }
+    case "sync_derive_session_key": {
+      const { sharedSecret, context } = payload as { sharedSecret: string; context: string };
+      body = JSON.stringify({ sharedSecret, context });
+      break;
+    }
+    case "sync_encrypt": {
+      const { key, plaintext } = payload as { key: string; plaintext: string };
+      body = JSON.stringify({ key, plaintext });
+      break;
+    }
+    case "sync_decrypt": {
+      const { key, ciphertext } = payload as { key: string; ciphertext: string };
+      body = JSON.stringify({ key, ciphertext });
+      break;
+    }
+    case "sync_hash_pairing_code": {
+      const { code } = payload as { code: string };
+      body = JSON.stringify({ code });
+      break;
+    }
+    case "sync_hmac_sha256": {
+      const { key, data } = payload as { key: string; data: string };
+      body = JSON.stringify({ key, data });
+      break;
+    }
+    case "sync_compute_sas": {
+      const { sharedSecret } = payload as { sharedSecret: string };
+      body = JSON.stringify({ sharedSecret });
+      break;
+    }
     // Device Sync commands - Pairing (Issuer - Trusted Device)
     case "create_pairing": {
       const { codeHash, ephemeralPublicKey } = payload as {
@@ -1380,13 +1492,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
         liabilityId: string;
         request: Record<string, unknown>;
       };
-      url += `/${encodeURIComponent(liabilityId)}/link`;
+      url += `/${encodeURIComponent(liabilityId)}/link-liability`;
       body = JSON.stringify(request);
       break;
     }
     case "unlink_liability": {
       const { liabilityId } = payload as { liabilityId: string };
-      url += `/${encodeURIComponent(liabilityId)}/unlink`;
+      url += `/${encodeURIComponent(liabilityId)}/link-liability`;
       break;
     }
     case "update_alternative_asset_metadata": {
@@ -1488,7 +1600,7 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   }
 
   const headers: HeadersInit = {};
-  if (body !== undefined) {
+  if (body !== undefined && jsonBody) {
     headers["Content-Type"] = "application/json";
   }
   if (command === "get_health_status" || command === "run_health_checks") {
@@ -1514,13 +1626,59 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
   if (res.status === 401) {
     notifyUnauthorized();
   }
+  if (command === "export_data_file") {
+    if (res.status === 204) {
+      return { status: "empty" } as T;
+    }
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const text = await res.text();
+        if (text.trim()) {
+          try {
+            const err = JSON.parse(text) as { message?: unknown; error?: unknown };
+            msg =
+              typeof err.message === "string"
+                ? err.message
+                : typeof err.error === "string"
+                  ? err.error
+                  : text.trim();
+          } catch {
+            msg = text.trim();
+          }
+        }
+      } catch (_e) {
+        void 0;
+      }
+      console.error(`[Invoke] Command "${command}" failed: ${msg}`);
+      throw new Error(msg);
+    }
+    const data = Array.from(new Uint8Array(await res.arrayBuffer()));
+    return {
+      status: "content",
+      filename: filenameFromContentDisposition(res.headers.get("Content-Disposition")) ?? undefined,
+      data,
+    } as T;
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try {
-      const err = await res.json();
-      msg = (err?.message ?? msg) as string;
+      const text = await res.text();
+      if (text.trim()) {
+        try {
+          const err = JSON.parse(text) as { message?: unknown; error?: unknown };
+          msg =
+            typeof err.message === "string"
+              ? err.message
+              : typeof err.error === "string"
+                ? err.error
+                : text.trim();
+        } catch {
+          msg = text.trim();
+        }
+      }
     } catch (_e) {
-      // ignore JSON parse error from non-JSON error bodies
+      // ignore body read error
       void 0;
     }
     console.error(`[Invoke] Command "${command}" failed: ${msg}`);

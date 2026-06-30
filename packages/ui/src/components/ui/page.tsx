@@ -124,7 +124,7 @@ export function PageHeader({
   const { isScrolled } = usePage();
 
   const titleContent = heading ? (
-    <div data-tauri-drag-region={dragRegion ? "true" : undefined} className="flex min-w-0 items-center gap-3">
+    <div data-desktop-drag-region={dragRegion ? "true" : undefined} className="flex min-w-0 items-center gap-3">
       {headingPrefix && (
         <>
           <h1 className="text-muted-foreground truncate text-lg font-semibold md:text-xl">{headingPrefix}</h1>
@@ -154,7 +154,7 @@ export function PageHeader({
       {...props}
     >
       {dragRegion && (
-        <div data-tauri-drag-region="true" className="pointer-events-auto absolute inset-x-0 top-0 h-6 opacity-0" />
+        <div data-desktop-drag-region="true" className="pointer-events-auto absolute inset-x-0 top-0 h-6 opacity-0" />
       )}
 
       <div className="p-4">

@@ -112,6 +112,56 @@ describe("parseErrorCode", () => {
     const result = parseErrorCode("missingApiKey", "This should be ignored");
     expect(result.message).toBe(ERROR_CODE_MAP.missingApiKey.message);
   });
+
+  it("should preserve backend invalid_input messages", () => {
+    const message =
+      "The current model does not support image/PDF attachments (scan.png). Please switch to a vision-capable model.";
+    const result = parseErrorCode("invalid_input", message);
+
+    expect(result).toMatchObject({
+      code: "invalid_input",
+      message,
+      retryable: false,
+    });
+  });
+
+  it("should map backend snake_case error codes to user-friendly messages", () => {
+    expect(parseErrorCode("provider_not_configured")).toMatchObject({
+      code: "provider_not_configured",
+      message: ERROR_CODE_MAP.providerNotConfigured.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("missing_api_key")).toMatchObject({
+      message: ERROR_CODE_MAP.missingApiKey.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("provider_error")).toMatchObject({
+      message: ERROR_CODE_MAP.providerError.message,
+      retryable: true,
+    });
+    expect(parseErrorCode("not_implemented")).toMatchObject({
+      message: ERROR_CODE_MAP.notImplemented.message,
+      retryable: false,
+    });
+  });
+
+  it("should map Rust-style uppercase backend error codes", () => {
+    const invalidMessage = "Invalid attachment";
+
+    expect(parseErrorCode("INVALID_INPUT", invalidMessage)).toMatchObject({
+      code: "INVALID_INPUT",
+      message: invalidMessage,
+      retryable: false,
+    });
+    expect(parseErrorCode("MISSING_API_KEY")).toMatchObject({
+      message: ERROR_CODE_MAP.missingApiKey.message,
+      retryable: false,
+    });
+    expect(parseErrorCode("PROVIDER_ERROR")).toMatchObject({
+      message: ERROR_CODE_MAP.providerError.message,
+      retryable: true,
+    });
+  });
 });
 
 describe("ERROR_CODE_MAP", () => {
@@ -126,6 +176,7 @@ describe("ERROR_CODE_MAP", () => {
       "providerError",
       "threadNotFound",
       "invalidInput",
+      "notImplemented",
       "internal",
       "cancelled",
       "network",

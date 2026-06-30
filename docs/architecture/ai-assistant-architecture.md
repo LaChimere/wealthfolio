@@ -7,6 +7,27 @@ natural language queries. It uses LLM orchestration with tool calling to fetch
 and analyze financial data, presenting results through a streaming chat
 interface.
 
+## TypeScript backend migration status
+
+The Rust `wealthfolio-ai` crate remains the reference implementation for full
+assistant behavior: built-in portfolio tools and multimodal attachment
+orchestration. The TypeScript/Bun backend now supports a bounded text streaming
+path for configured providers, provider-native and `<think>` fallback reasoning
+deltas, generated/refined thread titles,
+OpenAI-compatible/Ollama/Anthropic/Gemini injected tool-call execution, the
+built-in `get_accounts`, `get_holdings`, `get_cash_balances`, `get_goals`,
+`search_activities`, `get_performance`, `get_income`, `get_valuation_history`,
+`get_asset_allocation`, `get_health_status`, `record_activity`,
+`record_activities`, and `import_csv` tools, validated text/CSV attachment
+content injected into the provider prompt, Anthropic/Gemini image/PDF
+attachments sent as native media parts, and OpenAI-compatible/Ollama image
+attachments sent as provider-native media payloads while persisting only
+attachment filename markers. It preserves the Rust-shaped NDJSON event contract
+(`system`, `textDelta`, `reasoningDelta`, `toolCall`, `toolResult`,
+`threadTitleUpdated`, `done`, `error`) and persists user/assistant messages, but
+OpenAI-compatible/Ollama PDF attachment support remains deferred until those
+provider paths support safe native PDF payloads.
+
 ## Architecture Diagram
 
 ```
@@ -29,9 +50,9 @@ interface.
 │                         Transport Layer                                      │
 │                                                                              │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐ │
-│  │   Tauri (Desktop)           │    │   Axum (Web Server)                 │ │
-│  │   - IPC Channel streaming   │    │   - NDJSON HTTP streaming           │ │
-│  │   - TauriAiEnvironment      │    │   - ServerAiEnvironment             │ │
+│  │   Electron (Desktop)        │    │   Bun TS Backend (Web)              │ │
+│  │   - IPC-mediated streaming  │    │   - NDJSON HTTP streaming           │ │
+│  │   - DesktopAiEnvironment    │    │   - ServerAiEnvironment             │ │
 │  └─────────────────────────────┘    └─────────────────────────────────────┘ │
 │                                    │                                         │
 └────────────────────────────────────┼─────────────────────────────────────────┘
@@ -48,7 +69,7 @@ interface.
 │  │  │  Thread Cache   │  │   rig-core      │  │   Tool Registry     │   │  │
 │  │  │  (LRU, 100)     │  │   Agent         │  │   - get_holdings    │   │  │
 │  │  │                 │  │   - streaming   │  │   - get_accounts    │   │  │
-│  │  │  Fast lookups   │  │   - multi-turn  │  │   - search_activity │   │  │
+│  │  │  Fast lookups   │  │   - multi-turn  │  │   - cash balances   │   │  │
 │  │  │  for recent     │  │   - tool calls  │  │   - get_performance │   │  │
 │  │  │  threads        │  │                 │  │   - get_goals       │   │  │
 │  │  └─────────────────┘  └─────────────────┘  └─────────────────────┘   │  │
@@ -207,7 +228,7 @@ async fn persistence_actor(
 
 ### AiEnvironment Trait
 
-Dependency injection interface implemented by Tauri and Axum:
+Dependency injection interface implemented by desktop and web backend runtimes:
 
 ```rust
 pub trait AiEnvironment: Send + Sync {
@@ -365,6 +386,7 @@ Tools enforce maximum output sizes to prevent context overflow:
 | search_activities | 200 rows   | `MAX_ACTIVITIES_ROWS`   |
 | get_valuations    | 400 points | `MAX_VALUATIONS_POINTS` |
 | get_income        | 50 records | `MAX_INCOME_RECORDS`    |
+| get_goals         | 50 goals   | `MAX_GOALS`             |
 
 ## Message Content Schema
 

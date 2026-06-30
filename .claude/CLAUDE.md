@@ -1,13 +1,14 @@
 ## Project Overview
 
 Wealthfolio - Desktop investment tracker with local-first data. React + Vite
-frontend, Tauri/Rust backend, SQLite storage.
+frontend, Electron desktop shell, Bun TypeScript backend, SQLite storage.
 
 Key directories:
 
 - `apps/frontend/` — React app (pages, components, commands, hooks)
-- `apps/tauri/` — Tauri desktop/mobile app (IPC commands)
-- `apps/server/` — Axum HTTP server (web mode)
+- `apps/electron/` — Electron main/preload desktop shell
+- `apps/backend/` — Bun TypeScript backend runtime
+- `apps/server/` — Legacy Rust/Axum compatibility reference
 - `crates/` — Rust crates (core logic, storage, market-data, connect,
   device-sync)
 - `packages/` — Shared TS packages (addon-sdk, ui, addon-dev-tools)
@@ -15,11 +16,11 @@ Key directories:
 
 ## Quick Commands
 
-- Dev desktop: `pnpm tauri dev`
-- Dev web: `pnpm run dev:web`
-- Tests: `pnpm test` | `cargo test`
-- Type check: `pnpm type-check`
-- Lint: `pnpm lint`
+- Dev desktop: `bun run dev:electron`
+- Dev web: `bun run dev:web`
+- Tests: `bun run test` | `cargo test`
+- Type check: `bun run type-check`
+- Lint: `bun run lint`
 
 ## Plan Mode
 

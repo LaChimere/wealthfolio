@@ -1,13 +1,10 @@
 // Global ambient type declarations to avoid `any` for globals
-import type { QueryClient } from '@tanstack/react-query';
+import type { WealthfolioElectronApi } from '@wealthfolio/electron/shared/ipc';
 
 declare global {
   interface Window {
-    // Tauri global injected by the desktop runtime
-    __TAURI__?: unknown;
+    wealthfolioElectron?: WealthfolioElectronApi;
 
-    // Exposed for addon integration
-    __wealthfolio_query_client__?: QueryClient;
     __wealthfolio_navigate__?: (route: string) => void;
 
     // Dev helpers and framework singletons made available at runtime
@@ -23,4 +20,3 @@ declare global {
 }
 
 export {};
-

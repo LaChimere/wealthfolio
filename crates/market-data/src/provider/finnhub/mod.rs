@@ -343,9 +343,10 @@ impl FinnhubProvider {
         })
     }
 
-    /// Fetch historical quotes from /stock/candle endpoint.
+    /// Fetch historical quotes from the instrument-specific candle endpoint.
     async fn fetch_historical_quotes(
         &self,
+        endpoint: &str,
         symbol: &str,
         currency: &str,
         start: DateTime<Utc>,
@@ -361,7 +362,7 @@ impl FinnhubProvider {
             ("to", &to_ts),
         ];
 
-        let text = self.fetch("/stock/candle", &params).await?;
+        let text = self.fetch(endpoint, &params).await?;
 
         let response: CandleResponse =
             serde_json::from_str(&text).map_err(|e| MarketDataError::ProviderError {
@@ -553,8 +554,12 @@ impl MarketDataProvider for FinnhubProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            // Finnhub primarily supports equities, but also has crypto/forex
-            instrument_kinds: &[InstrumentKind::Equity],
+            // Finnhub primarily supports equities, but also has crypto/forex.
+            instrument_kinds: &[
+                InstrumentKind::Equity,
+                InstrumentKind::Crypto,
+                InstrumentKind::Fx,
+            ],
             // Global coverage for major exchanges (free tier = US only)
             coverage: Coverage::global_best_effort(),
             supports_latest: true,
@@ -593,6 +598,7 @@ impl MarketDataProvider for FinnhubProvider {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<Vec<Quote>, MarketDataError> {
+        let endpoint = finnhub_candle_endpoint(&instrument);
         let symbol = self.extract_symbol(&instrument)?;
         let currency = self.get_currency(context);
 
@@ -604,7 +610,7 @@ impl MarketDataProvider for FinnhubProvider {
         );
 
         let quotes = self
-            .fetch_historical_quotes(&symbol, &currency, start, end)
+            .fetch_historical_quotes(endpoint, &symbol, &currency, start, end)
             .await?;
 
         if quotes.is_empty() {
@@ -628,6 +634,16 @@ impl MarketDataProvider for FinnhubProvider {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+fn finnhub_candle_endpoint(instrument: &ProviderInstrument) -> &'static str {
+    match instrument {
+        ProviderInstrument::CryptoSymbol { .. } | ProviderInstrument::CryptoPair { .. } => {
+            "/crypto/candle"
+        }
+        ProviderInstrument::FxSymbol { .. } | ProviderInstrument::FxPair { .. } => "/forex/candle",
+        _ => "/stock/candle",
+    }
+}
 
 /// Map Finnhub security type to our asset type.
 fn map_security_type(finnhub_type: &str) -> String {
@@ -691,6 +707,8 @@ mod tests {
         let provider = FinnhubProvider::new("test_key".to_string());
         let caps = provider.capabilities();
         assert!(caps.instrument_kinds.contains(&InstrumentKind::Equity));
+        assert!(caps.instrument_kinds.contains(&InstrumentKind::Crypto));
+        assert!(caps.instrument_kinds.contains(&InstrumentKind::Fx));
         assert!(caps.supports_latest);
         assert!(caps.supports_historical);
         assert!(caps.supports_search);
@@ -751,6 +769,30 @@ mod tests {
         };
         let symbol = provider.extract_symbol(&instrument).unwrap();
         assert_eq!(symbol, "OANDA:EUR_USD");
+    }
+
+    #[test]
+    fn test_candle_endpoint_by_instrument_kind() {
+        assert_eq!(
+            finnhub_candle_endpoint(&ProviderInstrument::EquitySymbol {
+                symbol: Arc::from("AAPL"),
+            }),
+            "/stock/candle"
+        );
+        assert_eq!(
+            finnhub_candle_endpoint(&ProviderInstrument::CryptoPair {
+                symbol: Arc::from("BTC"),
+                market: Cow::Borrowed("USDT"),
+            }),
+            "/crypto/candle"
+        );
+        assert_eq!(
+            finnhub_candle_endpoint(&ProviderInstrument::FxPair {
+                from: Cow::Borrowed("EUR"),
+                to: Cow::Borrowed("USD"),
+            }),
+            "/forex/candle"
+        );
     }
 
     #[test]

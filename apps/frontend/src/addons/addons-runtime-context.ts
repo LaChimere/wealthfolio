@@ -1,7 +1,12 @@
 import type { AddonContext, SidebarItemHandle } from "@wealthfolio/addon-sdk";
 import React from "react";
 import { toast } from "sonner";
-import { createSDKHostAPIBridge } from "./type-bridge";
+import {
+  createAddonPermissionGuard,
+  createSDKHostAPIBridge,
+  type AddonPermissionGuard,
+  type RuntimeAddonPermission,
+} from "./type-bridge";
 
 // Import all command functions
 import {
@@ -67,6 +72,7 @@ import {
 } from "@/adapters";
 import {
   listenMarketSyncComplete,
+  listenMarketSyncError,
   listenMarketSyncStart,
   listenPortfolioUpdateComplete,
   listenPortfolioUpdateError,
@@ -98,6 +104,60 @@ const dynamicRoutes = new Map<string, React.LazyExoticComponent<React.ComponentT
 
 // Navigation update listeners
 const navigationUpdateListeners = new Set<() => void>();
+
+interface AddonQueryClientLike {
+  invalidateQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
+  refetchQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
+}
+
+let hostAddonQueryClient: AddonQueryClientLike | undefined;
+
+export function setAddonHostQueryClient(queryClient: AddonQueryClientLike | undefined) {
+  hostAddonQueryClient = queryClient;
+}
+
+function hostQueryClient(): AddonQueryClientLike | undefined {
+  return hostAddonQueryClient;
+}
+
+function normalizeQueryKey(queryKey: string | string[]): string[] {
+  return Array.isArray(queryKey) ? queryKey : [queryKey];
+}
+
+function addonQueryClientFacade(queryClient: AddonQueryClientLike | undefined) {
+  if (!queryClient) {
+    return undefined;
+  }
+  return {
+    invalidateQueries: (queryKey: string | string[]) =>
+      queryClient.invalidateQueries({ queryKey: normalizeQueryKey(queryKey), exact: false }),
+    refetchQueries: (queryKey: string | string[]) =>
+      queryClient.refetchQueries({ queryKey: normalizeQueryKey(queryKey), exact: false }),
+  };
+}
+
+function assertInternalAddonRoute(addonId: string, route: string, permissionPath: string): void {
+  if (route === "#") {
+    return;
+  }
+  if (
+    route.length === 0 ||
+    route.trim() !== route ||
+    hasControlCharacter(route) ||
+    route.includes("\\") ||
+    !route.startsWith("/") ||
+    route.startsWith("//")
+  ) {
+    throw new Error(`Addon ${addonId} must provide an internal app route for ${permissionPath}`);
+  }
+}
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
+}
 
 // Function to notify navigation update listeners
 function notifyNavigationUpdate() {
@@ -144,19 +204,22 @@ export function triggerAllDisableCallbacks() {
 }
 
 // Create addon-scoped secret functions
-function createAddonScopedSecrets(addonId: string) {
+function createAddonScopedSecrets(addonId: string, permissionGuard: AddonPermissionGuard) {
   const addonPrefix = `addon_${addonId}_`;
 
   return {
     set: async (key: string, value: string): Promise<void> => {
+      permissionGuard.assertAllowed("api.secrets.set");
       const scopedKey = `${addonPrefix}${key}`;
       return setSecret(scopedKey, value);
     },
     get: async (key: string): Promise<string | null> => {
+      permissionGuard.assertAllowed("api.secrets.get");
       const scopedKey = `${addonPrefix}${key}`;
       return getSecret(scopedKey);
     },
     delete: async (key: string): Promise<void> => {
+      permissionGuard.assertAllowed("api.secrets.delete");
       const scopedKey = `${addonPrefix}${key}`;
       return deleteSecret(scopedKey);
     },
@@ -164,7 +227,16 @@ function createAddonScopedSecrets(addonId: string) {
 }
 
 // Create context factory function for addon-specific contexts
-export function createAddonContext(addonId: string): AddonContext {
+export function createAddonContext(
+  addonId: string,
+  permissions?: readonly RuntimeAddonPermission[] | null,
+): AddonContext {
+  const permissionGuard = createAddonPermissionGuard({
+    addonId,
+    permissions,
+    onDenied: (message) => logger.warn(message),
+  });
+
   return {
     sidebar: {
       addItem: (cfg: {
@@ -175,11 +247,15 @@ export function createAddonContext(addonId: string): AddonContext {
         order?: number;
         onClick?: () => void;
       }): SidebarItemHandle => {
+        permissionGuard.assertAllowed("context.sidebar.addItem");
+        const href = cfg.route ?? "#";
+        assertInternalAddonRoute(addonId, href, "context.sidebar.addItem");
+
         // Create navigation item
         const navItem = {
           icon: cfg.icon ?? '<Icons.Circle className="h-5 w-5" />',
           title: cfg.label,
-          href: cfg.route ?? "#",
+          href,
           onClick: cfg.onClick,
           order: cfg.order ?? 999,
           id: cfg.id,
@@ -204,6 +280,9 @@ export function createAddonContext(addonId: string): AddonContext {
         path: string;
         component: React.LazyExoticComponent<React.ComponentType<unknown>>;
       }): void => {
+        permissionGuard.assertAllowed("context.router.add");
+        assertInternalAddonRoute(addonId, r.path, "context.router.add");
+
         // Store the route component
         dynamicRoutes.set(r.path, r.component);
 
@@ -293,6 +372,7 @@ export function createAddonContext(addonId: string): AddonContext {
           listenPortfolioUpdateError,
           listenMarketSyncStart,
           listenMarketSyncComplete,
+          listenMarketSyncError,
 
           // Activity import
           importActivities,
@@ -330,38 +410,21 @@ export function createAddonContext(addonId: string): AddonContext {
           },
 
           // Query functions
-          getQueryClient: () => {
-            interface QueryClientLike {
-              invalidateQueries: (opts: { queryKey: string[] }) => unknown;
-              refetchQueries: (opts: { queryKey: string[] }) => unknown;
-            }
-            return (window as unknown as { __wealthfolio_query_client__?: QueryClientLike })
-              .__wealthfolio_query_client__;
-          },
+          getQueryClient: () => addonQueryClientFacade(hostQueryClient()),
           invalidateQueries: (queryKey: string | string[]) => {
-            interface QueryClientLike {
-              invalidateQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
-            }
-            const queryClient = (
-              window as unknown as { __wealthfolio_query_client__?: QueryClientLike }
-            ).__wealthfolio_query_client__;
+            const queryClient = hostQueryClient();
             if (queryClient) {
               queryClient.invalidateQueries({
-                queryKey: Array.isArray(queryKey) ? queryKey : [queryKey],
+                queryKey: normalizeQueryKey(queryKey),
                 exact: false,
               });
             }
           },
           refetchQueries: (queryKey: string | string[]) => {
-            interface QueryClientLike {
-              refetchQueries: (opts: { queryKey: string[]; exact?: boolean }) => unknown;
-            }
-            const queryClient = (
-              window as unknown as { __wealthfolio_query_client__?: QueryClientLike }
-            ).__wealthfolio_query_client__;
+            const queryClient = hostQueryClient();
             if (queryClient) {
               queryClient.refetchQueries({
-                queryKey: Array.isArray(queryKey) ? queryKey : [queryKey],
+                queryKey: normalizeQueryKey(queryKey),
                 exact: false,
               });
             }
@@ -374,12 +437,13 @@ export function createAddonContext(addonId: string): AddonContext {
           toastInfo: (message: string) => toast.info(message),
         },
         addonId,
+        permissionGuard,
       );
 
       // Add the secrets API manually (without `any`)
       const apiWithSecrets = {
         ...baseAPI,
-        secrets: createAddonScopedSecrets(addonId),
+        secrets: createAddonScopedSecrets(addonId, permissionGuard),
       };
 
       return apiWithSecrets;

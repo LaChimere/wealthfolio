@@ -19,7 +19,7 @@ const loadedAddons = new Map<string, { disable?: () => void }>();
 const loadedAddonIds = new Set<string>(); // Prevent re-loading already processed addons
 
 /**
- * Discovers all available addons using Tauri commands
+ * Discovers all available addons through the runtime adapter.
  */
 async function discoverAddons(): Promise<AddonFile[]> {
   try {
@@ -28,7 +28,7 @@ async function discoverAddons(): Promise<AddonFile[]> {
 
     for (const addon of installedAddons) {
       // Create AddonFile structure from InstalledAddon
-      // Note: filePath from Tauri represents the addon directory, not the specific file
+      // Note: filePath represents the addon directory, not the specific file
       addonFiles.push({
         path: `${addon.filePath}/${addon.metadata.main}`, // Construct the main file path
         manifestPath: `${addon.filePath}/manifest.json`, // Construct manifest path
@@ -58,7 +58,7 @@ function validateAddonCompatibility(manifest: AddonManifest): boolean {
 }
 
 /**
- * Loads a single addon using Tauri commands
+ * Loads a single addon through the runtime adapter.
  */
 async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<boolean> {
   let blobUrl: string | null = null;
@@ -78,8 +78,7 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
       return false;
     }
 
-    // Load addon using Tauri command instead of direct file access
-    // Load addon for runtime execution using Tauri command
+    // Load addon for runtime execution through the backend instead of direct file access.
     const extractedAddon = await loadAddonRuntime(addonFile.manifest.id);
 
     // Find the main file from the extracted addon files
@@ -97,12 +96,13 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
     // Source maps can't be loaded from blob: URLs and cause console errors
     addonCode = addonCode.replace(/\/\/# sourceMappingURL=.*/g, "");
 
-    // Extract permission data directly from manifest (already processed by Rust backend)
-    const permissions = extractedAddon.metadata.permissions ?? [];
-    const detectedFunctions = permissions.flatMap((p) =>
+    // Extract permission data directly from manifest (already processed by the backend)
+    const permissions = extractedAddon.metadata.permissions ?? null;
+    const permissionsForLogging = permissions ?? [];
+    const detectedFunctions = permissionsForLogging.flatMap((p) =>
       p.functions.filter((f) => f.isDetected).map((f) => f.name),
     );
-    const detectedCategories = [...new Set(permissions.map((p) => p.category))];
+    const detectedCategories = [...new Set(permissionsForLogging.map((p) => p.category))];
 
     logger.info(
       `Permissions for addon ${extractedAddon.metadata.id}: functions=[${detectedFunctions.join(",")}], categories=[${detectedCategories.join(",")}]`,
@@ -166,7 +166,7 @@ async function loadAddon(addonFile: AddonFile, _context: AddonContext): Promise<
     }
 
     // Create addon-specific context with scoped secrets
-    const addonSpecificContext = createAddonContext(extractedAddon.metadata.id);
+    const addonSpecificContext = createAddonContext(extractedAddon.metadata.id, permissions);
     const result = await enableFunction(addonSpecificContext);
 
     // Store addon reference for potential cleanup

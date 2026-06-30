@@ -45,7 +45,7 @@
     "url": "https://github.com/wealthfolio/wealthfolio/issues"
   },
   "scripts": {
-    "build": "tsup && pnpm run build:types",
+    "build": "tsup && bun run build:types",
     "dev": "tsup --watch",
     "clean": "rm -rf dist",
     "lint": "eslint .",
@@ -53,9 +53,10 @@
     "lint:quiet": "eslint . --quiet",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "test": "bun test",
     "type-check": "tsc --noEmit",
     "build:types": "tsc -p tsconfig.json",
-    "prepack": "npm run build"
+    "prepack": "bun run build"
   },
   "peerDependencies": {
     "react": "^19.2.4",
@@ -66,7 +67,7 @@
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=20.0.0"

@@ -48,7 +48,7 @@ easy-to-use tool to track their investments and goals.
 ### Phase 3: Multi-Platform (Current - v3.0)
 
 - [x] Self-hosted web app with Docker support
-- [x] REST API server (Axum)
+- [x] REST API server (Bun/TypeScript; legacy Axum reference retained)
 - [x] Mobile app (iOS/Android via Tauri)
 - [x] Wealthfolio Connect: Device sync with end-to-end encryption (E2EE)
 - [x] Wealthfolio Connect: broker data sync service

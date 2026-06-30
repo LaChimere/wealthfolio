@@ -16,14 +16,12 @@ coverage/
 node_modules/
 
 # Generated files
-apps/tauri/gen/
 **/*.d.ts
 
 # Assets and images
 apps/frontend/public/
 
 # Rust code
-apps/tauri/
 apps/server/
 crates/
 
@@ -40,7 +38,7 @@ crates/
 *.eot
 
 # Lock files
-pnpm-lock.yaml
+bun.lock
 package-lock.json
 yarn.lock
 

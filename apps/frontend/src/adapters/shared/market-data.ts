@@ -198,9 +198,9 @@ export const resolveSymbolQuote = async (
       providerId,
       quoteCcy,
     });
-  } catch (_error) {
+  } catch (error) {
     logger.error("Error resolving symbol quote.");
-    return null;
+    throw error;
   }
 };
 

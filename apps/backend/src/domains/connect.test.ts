@@ -1,0 +1,13215 @@
+import { Database } from "bun:sqlite";
+import { describe, expect, test } from "bun:test";
+
+import { ACTIVITY_BULK_CREATED_ASSET_IDS } from "./activities";
+import type { SecretService } from "./secrets";
+import {
+  createLocalConnectDeviceSyncService,
+  createLocalConnectService,
+  localNotReadyBackoffMs,
+} from "./connect";
+import { DEVICE_SYNC_PULL_COMPLETE_EVENT } from "../domain-events/planner";
+import { createEventBus, type BackendEvent } from "../events";
+import { createSyncCryptoService } from "./sync-crypto";
+
+function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
+  const entries = new Map<string, string>();
+  return {
+    entries,
+    setSecret(secretKey, secret) {
+      entries.set(secretKey, secret);
+    },
+    getSecret(secretKey) {
+      return entries.get(secretKey) ?? null;
+    },
+    deleteSecret(secretKey) {
+      entries.delete(secretKey);
+    },
+  };
+}
+
+function fakeJwtWithExp(exp: number): string {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
+  return `${header}.${payload}.sig`;
+}
+
+function connectSubscriptionPlan(id: string): Record<string, unknown> {
+  return {
+    id,
+    name: `${id} plan`,
+    tagline: null,
+    description: `${id} description`,
+    pricing: { monthly: 10, yearly: 100, yearlyPerMonth: 8.33 },
+    limits: { householdSize: 4, institutionConnections: "unlimited", devices: 5 },
+    features: ["sync"],
+    featuresExtended: null,
+    isAvailable: true,
+    isComingSoon: false,
+    badge: null,
+    yearlyDiscountPercent: null,
+  };
+}
+
+function snapshotDownloadResponse(
+  checksum = "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+  overrides: Record<string, string | null> = {},
+): Response {
+  const headers: Record<string, string> = {
+    "x-snapshot-schema-version": "1",
+    "x-snapshot-covers-tables": "accounts",
+    "x-snapshot-checksum": checksum,
+  };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) {
+      delete headers[key];
+    } else {
+      headers[key] = value;
+    }
+  }
+  return new Response("snapshot", {
+    headers,
+  });
+}
+
+function unreadableConnectResponse(headers: HeadersInit = {}): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(headers),
+    text: async () => {
+      throw new Error("body broke");
+    },
+  } as Response;
+}
+
+function createDeviceSyncStateDb(): Database {
+  const db = new Database(":memory:");
+  db.exec(`
+    CREATE TABLE sync_cursor (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      cursor BIGINT NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE sync_engine_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      lock_version INTEGER NOT NULL DEFAULT 0,
+      last_push_at TEXT,
+      last_pull_at TEXT,
+      last_error TEXT,
+      consecutive_failures INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      last_cycle_status TEXT,
+      last_cycle_duration_ms INTEGER
+    );
+    CREATE TABLE sync_device_config (
+      device_id TEXT PRIMARY KEY NOT NULL,
+      key_version INTEGER,
+      trust_state TEXT NOT NULL DEFAULT 'untrusted',
+      last_bootstrap_at TEXT,
+      min_snapshot_created_at TEXT
+    );
+    CREATE TABLE sync_outbox (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_entity_metadata (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_applied_events (id TEXT PRIMARY KEY);
+    CREATE TABLE sync_table_state (id TEXT PRIMARY KEY);
+    INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+    INSERT INTO sync_engine_state (id, lock_version, last_cycle_status, last_error)
+      VALUES (1, 7, 'stale_cursor', 'stale');
+    INSERT INTO sync_device_config (
+      device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+    ) VALUES ('old-device', 1, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+    INSERT INTO sync_outbox (id) VALUES ('pending-event');
+    INSERT INTO sync_entity_metadata (id) VALUES ('meta');
+    INSERT INTO sync_applied_events (id) VALUES ('applied');
+    INSERT INTO sync_table_state (id) VALUES ('state');
+  `);
+  return db;
+}
+
+describe("TS Connect local session service", () => {
+  test("stores, reports, and clears cloud refresh session secrets", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_access_token", "legacy-access");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 1, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+    `);
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+    try {
+      await expect(service.getSyncSessionStatus()).resolves.toEqual({ isConfigured: false });
+
+      await service.storeSyncSession("refresh-token");
+      expect(secretService.entries.get("sync_refresh_token")).toBe("refresh-token");
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+      await expect(service.getSyncSessionStatus()).resolves.toEqual({ isConfigured: true });
+
+      await service.clearSyncSession();
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
+      await expect(service.getSyncSessionStatus()).resolves.toEqual({ isConfigured: false });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("restores sessions by refreshing access tokens and rotating refresh tokens", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    secretService.entries.set("sync_access_token", "legacy-access");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test/",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return new Response(
+          '{"access_token":"access-token","refresh_token":"rotated-refresh","expires_in":9223372036854775807}',
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toEqual({
+        accessToken: "access-token",
+        refreshToken: "rotated-refresh",
+      });
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh");
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.url).toBe(
+        "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+      );
+      expect(requests[0]?.init?.headers).toMatchObject({
+        apikey: "publishable-key",
+        "content-type": "application/json",
+      });
+      expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
+        refresh_token: "old-refresh",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reuses fresh JWT access tokens in memory and clears the cache on session replacement", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+    let authCalls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test/",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input, init) => {
+        authCalls += 1;
+        requests.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body)),
+        });
+        return Response.json({
+          access_token: fakeJwtWithExp(futureExp),
+          refresh_token: authCalls === 1 ? "rotated-refresh" : "replacement-refresh",
+          expires_in: 3600,
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "rotated-refresh",
+      });
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "rotated-refresh",
+      });
+      expect(authCalls).toBe(1);
+      expect(requests).toEqual([
+        {
+          url: "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+          body: { refresh_token: "old-refresh" },
+        },
+      ]);
+
+      await service.storeSyncSession("new-refresh");
+      await expect(service.restoreSyncSession()).resolves.toMatchObject({
+        refreshToken: "replacement-refresh",
+      });
+      expect(authCalls).toBe(2);
+      expect(requests[1]).toEqual({
+        url: "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        body: { refresh_token: "new-refresh" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not return a cached access token when the session changes during cache lookup", async () => {
+    const db = new Database(":memory:");
+    const baseSecretService = createMemorySecretService();
+    baseSecretService.entries.set("sync_refresh_token", "old-refresh");
+    const futureExp = Math.floor(Date.now() / 1000) + 3600;
+    const oldAccessToken = fakeJwtWithExp(futureExp);
+    const newAccessToken = fakeJwtWithExp(futureExp + 60);
+    let authCalls = 0;
+    let blockNextRefreshRead = false;
+    let releaseRefreshRead: (() => void) | null = null;
+    let refreshReadStarted: Promise<void> | null = null;
+    const secretService: SecretService & { entries: Map<string, string> } = {
+      ...baseSecretService,
+      async getSecret(secretKey) {
+        if (secretKey === "sync_refresh_token" && blockNextRefreshRead) {
+          blockNextRefreshRead = false;
+          refreshReadStarted = Promise.resolve();
+          await new Promise<void>((resolve) => {
+            releaseRefreshRead = resolve;
+          });
+        }
+        return baseSecretService.entries.get(secretKey) ?? null;
+      },
+    };
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_AUTH_URL: "https://auth.example.test/" },
+      fetch: async () => {
+        authCalls += 1;
+        return Response.json({
+          access_token: authCalls === 1 ? oldAccessToken : newAccessToken,
+          refresh_token: authCalls === 1 ? "rotated-refresh" : "replacement-refresh",
+          expires_in: 3600,
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).resolves.toEqual({
+        accessToken: oldAccessToken,
+        refreshToken: "rotated-refresh",
+      });
+      blockNextRefreshRead = true;
+      const cachedRestore = service.restoreSyncSession();
+      while (refreshReadStarted === null) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await service.storeSyncSession("new-refresh");
+      releaseRefreshRead?.();
+      await expect(cachedRestore).resolves.toEqual({
+        accessToken: newAccessToken,
+        refreshToken: "replacement-refresh",
+      });
+      expect(authCalls).toBe(2);
+    } finally {
+      releaseRefreshRead?.();
+      db.close();
+    }
+  });
+
+  test("clears invalid refresh sessions during restore", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    secretService.entries.set("sync_access_token", "legacy-access");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        Response.json(
+          { error: "invalid_grant", error_description: "Refresh Token Not Found" },
+          { status: 401 },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+      expect(secretService.entries.has("sync_access_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed refresh token response tokens during restore", async () => {
+    async function expectRejectedTokenResponse(body: string): Promise<void> {
+      const db = new Database(":memory:");
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "old-refresh");
+      const service = createLocalConnectService({
+        db,
+        secretService,
+        fetch: async () => new Response(body, { headers: { "content-type": "application/json" } }),
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+
+      try {
+        await expect(service.restoreSyncSession()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse token response",
+          status: 500,
+        });
+        expect(secretService.entries.get("sync_refresh_token")).toBe("old-refresh");
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","access_token":"other","refresh_token":"rotated-refresh"}',
+    );
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","refresh_token":123,"expires_in":3600}',
+    );
+    await expectRejectedTokenResponse(
+      '{"access_token":"access-token","refresh_token":"rotated-refresh","expires_in":3600.0}',
+    );
+  });
+
+  test("serializes concurrent restores so a stale refresh failure cannot clear a rotated token", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    let calls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () => {
+        calls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh",
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.restoreSyncSession(), service.restoreSyncSession()]),
+      ).resolves.toEqual([
+        { accessToken: "access-token", refreshToken: "rotated-refresh" },
+        { accessToken: "access-token", refreshToken: "rotated-refresh" },
+      ]);
+      expect(calls).toBe(1);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not resurrect cleared sessions when an in-flight restore completes", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "old-refresh");
+    let releaseRefresh: (() => void) | undefined;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () => {
+        await new Promise<void>((resolve) => {
+          releaseRefresh = resolve;
+        });
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh",
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      const restorePromise = service.restoreSyncSession();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await service.clearSyncSession();
+      releaseRefresh?.();
+
+      await expect(restorePromise).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats invalid OAuth error codes as invalid sessions even with generic descriptions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        Response.json(
+          { error: "invalid_grant", error_description: "bad request" },
+          { status: 400 },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to raw malformed OAuth error bodies before session invalidation", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "expired-refresh");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async () =>
+        new Response(
+          '{"error":"temporary","error_description":"Refresh Token Not Found","error_description":"temporary"}',
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.restoreSyncSession()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      expect(secretService.entries.has("sync_refresh_token")).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fetches public subscription plans from the Connect API", async () => {
+    const db = new Database(":memory:");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        return Response.json({ plans: [connectSubscriptionPlan("free")] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).resolves.toEqual({
+        plans: [connectSubscriptionPlan("free")],
+      });
+      expect(requests).toEqual([
+        {
+          url: "https://api.example.test/api/v1/subscription/plans",
+          init: {
+            method: "GET",
+            headers: expect.objectContaining({
+              "content-type": "application/json",
+              "x-wf-client-request-id": expect.stringMatching(
+                /^app:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+              ),
+            }),
+          },
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed public subscription plan payloads", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        Response.json({
+          plans: [{ id: "free", name: "Free", description: "Missing pricing and limits" }],
+        }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not parse public subscription plan error bodies", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        Response.json(
+          { message: "public plan failure should stay hidden" },
+          { status: 503, headers: { "x-request-id": "unsafe/request" } },
+        ),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^API error 503 \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on public response read errors", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () => unreadableConnectResponse({ "x-request-id": "server-read-123" }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^Failed to read response: body broke \(clientRequestId=app:[0-9a-f-]+, requestId=server-read-123\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on authenticated API errors", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json(
+          { error: "server_error", message: "temporary failure" },
+          { status: 500, headers: { "x-request-id": "server-req-123" } },
+        );
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^API error 500: temporary failure \(clientRequestId=app:[0-9a-f-]+, requestId=server-req-123\)$/,
+        ),
+        status: 500,
+      });
+      const connectRequest = requests.find((request) =>
+        request.url.includes("/api/v1/subscription/plans"),
+      );
+      expect(connectRequest?.init?.headers).toMatchObject({
+        "x-wf-client-request-id": expect.stringMatching(/^app:[0-9a-f-]+$/),
+      });
+      expect(connectRequest?.init?.headers).not.toHaveProperty("x-request-id");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on authenticated response read errors", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return unreadableConnectResponse({ "x-request-id": "server-read-456" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^Failed to read response: body broke \(clientRequestId=app:[0-9a-f-]+, requestId=server-read-456\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back on malformed authenticated Connect API error bodies", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response('{"message":"upstream unavailable","message":"later"}', {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^API error 503 \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed authenticated subscription plan scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody = JSON.stringify({
+      plans: [
+        {
+          ...connectSubscriptionPlan("pro"),
+          pricing: { monthly: "10", yearly: 100 },
+        },
+      ],
+    });
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({ plans: [connectSubscriptionPlan("pro")] }).replace(
+        '"householdSize":4',
+        '"householdSize":4.0',
+      );
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            limits: { householdSize: 4, institutionConnections: 2_147_483_648, devices: 5 },
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            limits: { householdSize: 4, institutionConnections: 4, devices: 5 },
+          },
+        ],
+      }).replace('"institutionConnections":4', '"institutionConnections":4.0');
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            yearlyDiscountPercent: 2_147_483_648,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("pro"),
+            yearlyDiscountPercent: 4,
+          },
+        ],
+      }).replace('"yearlyDiscountPercent":4', '"yearlyDiscountPercent":4.0');
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed subscription plan optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    let responseBody = JSON.stringify({
+      plans: [
+        {
+          ...connectSubscriptionPlan("free"),
+          tagline: 123,
+          isAvailable: "yes",
+        },
+      ],
+    });
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        new Response(responseBody, { headers: { "content-type": "application/json" } }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("free"),
+            isAvailable: null,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody = JSON.stringify({
+        plans: [
+          {
+            ...connectSubscriptionPlan("free"),
+            isComingSoon: null,
+          },
+        ],
+      });
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1},"isAvailable":true,"isAvailable":false}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1},"isComingSoon":false,"isComingSoon":true}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate Connect subscription plan keys", async () => {
+    const db = new Database(":memory:");
+    let responseBody =
+      '{"plans":[{"id":"free","name":"Free","name":"Later","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1}}]}';
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () =>
+        new Response(responseBody, { headers: { "content-type": "application/json" } }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"monthly":1,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1}}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+      responseBody =
+        '{"plans":[{"id":"free","name":"Free","description":"Free","pricing":{"monthly":0,"yearly":0},"limits":{"householdSize":1,"institutionConnections":"unlimited","devices":1,"devices":2}}]}';
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse plans response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fetches authenticated plans and maps user info with restored access tokens", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test",
+        CONNECT_API_URL: "https://api.example.test",
+      },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        expect(init?.headers).toMatchObject({
+          authorization: "Bearer access-token",
+          "content-type": "application/json",
+          "x-wf-client-request-id": expect.stringMatching(/^app:/),
+        });
+        if (String(input).endsWith("/api/v1/subscription/plans")) {
+          return Response.json({ plans: [connectSubscriptionPlan("pro")] });
+        }
+        return Response.json({
+          id: "user-1",
+          fullName: "Ada Lovelace",
+          full_name: 123,
+          email: "ada@example.test",
+          avatarUrl: "https://example.test/avatar.png",
+          avatar_url: 123,
+          locale: "en",
+          weekStartsOnMonday: true,
+          week_starts_on_monday: "true",
+          timezone: "UTC",
+          timezoneAutoSync: false,
+          timezone_auto_sync: "false",
+          timeFormat: 24,
+          time_format: "24",
+          dateFormat: "yyyy-MM-dd",
+          date_format: 123,
+          teamId: "team-1",
+          team_id: 123,
+          teamRole: "owner",
+          team_role: 123,
+          team: {
+            id: "team-1",
+            name: null,
+            logoUrl: null,
+            plan: "pro",
+            subscriptionStatus: "active",
+            subscription_status: 123,
+            subscriptionCurrentPeriodEnd: "2026-07-01T00:00:00Z",
+            subscription_current_period_end: 123,
+            subscriptionCancelAtPeriodEnd: false,
+            subscription_cancel_at_period_end: "false",
+            canceledAt: null,
+            countryCode: "US",
+            country_code: 123,
+            createdAt: "2026-01-01T00:00:00Z",
+            created_at: 123,
+          },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).resolves.toEqual({
+        plans: [connectSubscriptionPlan("pro")],
+      });
+      await expect(service.getUserInfo()).resolves.toMatchObject({
+        id: "user-1",
+        full_name: "Ada Lovelace",
+        avatar_url: "https://example.test/avatar.png",
+        week_starts_on_monday: true,
+        timezone_auto_sync: false,
+        time_format: 24,
+        date_format: "yyyy-MM-dd",
+        team_id: "team-1",
+        team_role: "owner",
+        team: {
+          id: "team-1",
+          name: "",
+          subscription_status: "active",
+          subscription_current_period_end: "2026-07-01T00:00:00Z",
+          subscription_cancel_at_period_end: false,
+          country_code: "US",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      });
+      expect(requests).toEqual([
+        "POST https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/subscription/plans",
+        "POST https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/user/me",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect user info missing required ids", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ email: "missing-id@example.test" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect user info with team missing required id", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ id: "user-1", team: { name: "Team" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse team info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect user info optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ id: "user-1", email: 123, weekStartsOnMonday: "true" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      const floatTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":24.5}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(floatTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      const rawFloatTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":24.0}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(rawFloatTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      const outOfRangeTimeFormatService = createLocalConnectService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response('{"id":"user-1","timeFormat":2147483648}', {
+            headers: { "content-type": "application/json" },
+          });
+        },
+        accountService: { getAllAccounts: () => [] },
+        activityService: {
+          getBrokerSyncProfile: () => null,
+          saveBrokerSyncProfileRules: (request) => request,
+        },
+      });
+      await expect(outOfRangeTimeFormatService.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate Connect user info aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"id":"user-1","fullName":"Ada","fullName":"Lovelace","team":{"id":"team-1"}}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse user info",
+        status: 500,
+      });
+      responseBody =
+        '{"id":"user-1","team":{"id":"team-1","subscriptionStatus":"active","subscriptionStatus":"trialing"}}';
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse team info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect user team optional scalar fields", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "user-1",
+          team: { id: "team-1", subscriptionCancelAtPeriodEnd: "false" },
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getUserInfo()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse team info",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("shares one token restore across concurrent authenticated Connect reads", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let authCalls = 0;
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          authCalls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/subscription/plans")) {
+          return Response.json({ plans: [connectSubscriptionPlan("pro")] });
+        }
+        return Response.json({ id: "user-1" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.getSubscriptionPlans(), service.getUserInfo()]),
+      ).resolves.toEqual([
+        { plans: [connectSubscriptionPlan("pro")] },
+        expect.objectContaining({ id: "user-1" }),
+      ]);
+      expect(authCalls).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("lists broker connections and accounts from authenticated Connect API reads", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({
+            connections: [
+              {
+                id: "connection-row-id",
+                authorization_id: "authorization-1",
+                authorizationId: 123,
+                status: "connected",
+                disabled: false,
+                updated_at: "2026-01-02T00:00:00Z",
+                updatedAt: 123,
+                name: "Main connection",
+                brokerage: {
+                  id: "brokerage-1",
+                  slug: "snaptrade",
+                  name: "SnapTrade",
+                  display_name: "SnapTrade Display",
+                  displayName: 123,
+                  aws_s3_logo_url: "https://logo.example.test/logo.png",
+                  awsS3LogoUrl: 123,
+                  aws_s3_square_logo_url: "https://logo.example.test/square.png",
+                  awsS3SquareLogoUrl: 123,
+                },
+              },
+              {
+                id: "connection-row-2",
+                brokerage_name: "Fallback Broker",
+                brokerageName: 123,
+                brokerage_slug: "fallback",
+                brokerageSlug: 123,
+              },
+            ],
+          });
+        }
+        return Response.json({
+          accounts: [{ id: "broker-account-1", name: "Broker Account", currency: "USD" }],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).resolves.toEqual([
+        {
+          id: "authorization-1",
+          brokerage: {
+            id: "brokerage-1",
+            slug: "snaptrade",
+            name: "SnapTrade",
+            display_name: "SnapTrade Display",
+            aws_s3_logo_url: "https://logo.example.test/logo.png",
+            aws_s3_square_logo_url: "https://logo.example.test/square.png",
+          },
+          type: null,
+          status: "connected",
+          disabled: false,
+          disabled_date: null,
+          updated_at: "2026-01-02T00:00:00Z",
+          name: "Main connection",
+        },
+        {
+          id: "connection-row-2",
+          brokerage: {
+            id: null,
+            slug: "fallback",
+            name: "Fallback Broker",
+            display_name: "Fallback Broker",
+            aws_s3_logo_url: null,
+            aws_s3_square_logo_url: null,
+          },
+          type: null,
+          status: null,
+          disabled: false,
+          disabled_date: null,
+          updated_at: null,
+          name: null,
+        },
+      ]);
+      await expect(service.listBrokerAccounts()).resolves.toEqual([
+        { id: "broker-account-1", name: "Broker Account", currency: "USD" },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("defaults missing broker connection and account arrays to empty lists", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({});
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).resolves.toEqual([]);
+      await expect(service.listBrokerAccounts()).resolves.toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed broker connections missing required ids", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ connections: [{ authorization_id: "authorization-1" }] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker connection response aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"connections":[{"id":"connection-1","authorization_id":"auth-1","authorization_id":"auth-2","brokerage_name":"Brokerage"}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+      responseBody =
+        '{"connections":[{"id":"connection-1","brokerage":{"id":"brokerage-1","display_name":"Broker","display_name":"Other"}}]}';
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse brokerage response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects broker connection fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"connections":[{"id":"connection-1","authorization_id":123,"disabled":"false"}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+      responseBody = '{"connections":[{"id":"connection-1","brokerage":"snaptrade"}]}';
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects broker connection brokerage fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          connections: [
+            { id: "connection-1", brokerage: { id: "brokerage-1", display_name: 123 } },
+          ],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse brokerage response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects broker connection fallback brokerage fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ connections: [{ id: "connection-1", brokerage_name: 123 }] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse connection response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed broker account entries", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ accounts: ["not-an-account"] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker account response aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody = '{"accounts":[{"id":"broker-account","account_number":"A1","number":"A2"}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","owner":{"full_name":"Ada","user_full_name":"Lovelace"}}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","sync_status":{"transactions":{"initial_sync_completed":true,"initial_sync_completed":false}}}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","institution_name":"A","institution_name":"B"}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody = '{"accounts":[{"id":"broker-account","is_paper":true,"is_paper":false}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody = '{"accounts":[{"id":"broker-account","type":"CASH","type":"TFSA"}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects broker account fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ accounts: [{ id: "broker-account", is_paper: null }] });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects broker account nested fields with invalid scalar types", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let responseBody =
+      '{"accounts":[{"id":"broker-account","balance":{"total":{"amount":"100","currency":"USD"}},"owner":{"user_id":123,"is_own_account":"true"},"sync_status":{"transactions":{"initial_sync_completed":"false"}}}]}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(responseBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+      responseBody =
+        '{"accounts":[{"id":"broker-account","balance":{"total":{"amount":1e999,"currency":"USD"}}}]}';
+      await expect(service.listBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs broker connections into local platforms", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      INSERT INTO platforms (id, name, url, external_id, kind, website_url, logo_url)
+      VALUES ('existing', 'Old Name', 'https://old.example.test', 'old-id', 'BROKERAGE', NULL, NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          connections: [
+            {
+              id: "row-1",
+              brokerage: {
+                id: "brokerage-1",
+                slug: "new_broker",
+                name: "New Broker",
+                display_name: "New Broker Display",
+                aws_s3_logo_url: "https://logo.example.test/logo.png",
+                aws_s3_square_logo_url: "https://logo.example.test/square.png",
+              },
+            },
+            {
+              id: "row-2",
+              brokerage: {
+                id: "brokerage-2",
+                slug: "existing",
+                name: "Existing Broker",
+                display_name: null,
+                aws_s3_logo_url: "https://logo.example.test/existing.png",
+                aws_s3_square_logo_url: null,
+              },
+            },
+            { id: "row-3", brokerage: null },
+          ],
+        });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerConnections()).resolves.toEqual({
+        synced: 3,
+        platformsCreated: 1,
+        platformsUpdated: 1,
+      });
+      expect(
+        db
+          .query<
+            {
+              id: string;
+              name: string | null;
+              url: string;
+              external_id: string | null;
+              logo_url: string | null;
+            },
+            []
+          >("SELECT id, name, url, external_id, logo_url FROM platforms ORDER BY id")
+          .all(),
+      ).toEqual([
+        {
+          id: "existing",
+          name: "Existing Broker",
+          url: "https://existing.com",
+          external_id: "brokerage-2",
+          logo_url: "https://logo.example.test/existing.png",
+        },
+        {
+          id: "new_broker",
+          name: "New Broker Display",
+          url: "https://newbroker.com",
+          external_id: "brokerage-1",
+          logo_url: "https://logo.example.test/square.png",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker connection aliases before syncing platforms", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(
+          '{"connections":[{"id":"row-1","brokerage":{"id":"brokerage-1","slug":"dup","display_name":"Broker","display_name":"Other"}}]}',
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerConnections()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse brokerage response",
+        status: 500,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM platforms").get(),
+      ).toEqual({
+        count: 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs new broker accounts into local accounts and skips existing provider accounts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      INSERT INTO platforms (id, name, url, external_id, kind, website_url, logo_url)
+      VALUES ('snaptrade', 'SnapTrade', 'https://snaptrade.com', 'brokerage-1', 'BROKERAGE', NULL, NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const localAccounts: Array<{ id: string; providerAccountId: string | null }> = [
+      { id: "existing-local", providerAccountId: "existing-provider-account" },
+    ];
+    const createdAccounts: unknown[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          accounts: [
+            {
+              id: "new-provider-account",
+              name: "Broker Account",
+              number: "****1234",
+              accountNumber: 123,
+              type: "TFSA",
+              account_type: 123,
+              accountType: 123,
+              currency: null,
+              balance: { total: { currency: "CAD" } },
+              status: "open",
+              brokerage_authorization: "brokerage-1",
+              brokerageAuthorization: 123,
+              institution_name: "SnapTrade",
+              institutionName: 123,
+              createdDate: 123,
+              isPaper: "false",
+              syncEnabled: "false",
+              sharedWithHousehold: "true",
+              syncStatus: {
+                transactions: {
+                  initialSyncCompleted: "false",
+                  lastSuccessfulSync: 123,
+                  firstTransactionDate: 123,
+                },
+              },
+              raw_type: "tfsa",
+              rawType: 123,
+              owner: {
+                user_id: "user-1",
+                userId: 123,
+                user_full_name: "Ada Lovelace",
+                fullName: 123,
+                avatarUrl: 123,
+                is_own_account: true,
+                isOwnAccount: "true",
+              },
+            },
+            { id: "existing-provider-account", name: "Existing Account" },
+            { name: "Missing ID Account" },
+            {
+              id: "meta-provider-account",
+              name: "Meta Brokerage Account",
+              currency: "USD",
+              meta: { brokerage: { id: "brokerage-1", name: "SnapTrade" } },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () =>
+          localAccounts.map((account) => ({
+            ...account,
+            name: "",
+            accountType: "",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "HOLDINGS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: null,
+          })),
+        createAccount: async (account) => {
+          const created = {
+            id: `created-local-${createdAccounts.length + 1}`,
+            name: account.name,
+            accountType: account.accountType,
+            group: account.group ?? null,
+            currency: account.currency,
+            isDefault: account.isDefault,
+            isActive: account.isActive,
+            isArchived: account.isArchived ?? false,
+            trackingMode: account.trackingMode ?? "NOT_SET",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            platformId: account.platformId ?? null,
+            accountNumber: account.accountNumber ?? null,
+            meta: account.meta ?? null,
+            provider: account.provider ?? null,
+            providerAccountId: account.providerAccountId ?? null,
+          };
+          createdAccounts.push(created);
+          localAccounts.push({ id: created.id, providerAccountId: created.providerAccountId });
+          return created;
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerAccounts()).resolves.toEqual({
+        synced: 4,
+        created: 2,
+        updated: 0,
+        skipped: 2,
+        createdAccounts: [
+          ["created-local-1", "CAD"],
+          ["created-local-2", "USD"],
+        ],
+        newAccountsInfo: [
+          {
+            localAccountId: "created-local-1",
+            providerAccountId: "new-provider-account",
+            defaultName: "Broker Account",
+            currency: "CAD",
+            institutionName: "SnapTrade",
+          },
+          {
+            localAccountId: "created-local-2",
+            providerAccountId: "meta-provider-account",
+            defaultName: "Meta Brokerage Account",
+            currency: "USD",
+            institutionName: null,
+          },
+        ],
+      });
+      expect(createdAccounts).toEqual([
+        expect.objectContaining({
+          id: "created-local-1",
+          name: "Broker Account",
+          accountType: "TFSA",
+          currency: "CAD",
+          isActive: true,
+          platformId: "snaptrade",
+          accountNumber: "****1234",
+          provider: "SNAPTRADE",
+          providerAccountId: "new-provider-account",
+          trackingMode: "HOLDINGS",
+        }),
+        expect.objectContaining({
+          id: "created-local-2",
+          name: "Meta Brokerage Account",
+          platformId: "snaptrade",
+          providerAccountId: "meta-provider-account",
+        }),
+      ]);
+      expect(JSON.parse(String((createdAccounts[0] as { meta: string }).meta))).toMatchObject({
+        institution_name: "SnapTrade",
+        brokerage_authorization: "brokerage-1",
+        raw_type: "tfsa",
+        sync_enabled: true,
+        owner: {
+          user_id: "user-1",
+          full_name: "Ada Lovelace",
+          is_own_account: true,
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects duplicate broker account aliases before syncing accounts", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(
+          '{"accounts":[{"id":"new-provider-account","type":"CASH","type":"TFSA"}]}',
+          { headers: { "content-type": "application/json" } },
+        );
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts from ambiguous broker payload");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerAccounts()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse accounts response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats activities-only sync as a no-op when all synced accounts are holdings-mode", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "holdings-account",
+            name: "Holdings",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "HOLDINGS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toEqual({
+        accountsSynced: 0,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runs bounded broker data sync through migrated connection, account, and holdings no-op slices", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const eventBus = createEventBus();
+    const events: BackendEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
+    const localAccounts: Array<{
+      id: string;
+      providerAccountId: string | null;
+      trackingMode: "HOLDINGS" | "NOT_SET";
+    }> = [
+      {
+        id: "needs-setup",
+        providerAccountId: "broker-account-needs-setup",
+        trackingMode: "NOT_SET",
+      },
+    ];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      eventBus,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            fullName: null,
+            email: "user@example.test",
+            team: {
+              id: "team-1",
+              name: "Team",
+              plan: "pro",
+              subscriptionStatus: "active",
+            },
+          });
+        }
+        if (String(input).endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({
+            connections: [
+              { id: "connection-1", brokerage_name: "Brokerage", brokerage_slug: "brokerage" },
+            ],
+          });
+        }
+        return Response.json({
+          accounts: [
+            {
+              id: "broker-account-1",
+              name: "Broker Account",
+              currency: "USD",
+              brokerage_authorization: "brokerage",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () =>
+          localAccounts.map((account) => ({
+            ...account,
+            name: "Broker Account",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            createdAt: "",
+            updatedAt: "",
+            platformId: "brokerage",
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+          })),
+        createAccount: async (account) => {
+          const created = {
+            id: "created-local",
+            providerAccountId: account.providerAccountId ?? null,
+            trackingMode: (account.trackingMode ?? "NOT_SET") as "HOLDINGS",
+          };
+          localAccounts.push(created);
+          return {
+            ...created,
+            name: account.name,
+            accountType: account.accountType,
+            group: account.group ?? null,
+            currency: account.currency,
+            isDefault: account.isDefault,
+            isActive: account.isActive,
+            isArchived: account.isArchived ?? false,
+            createdAt: "",
+            updatedAt: "",
+            platformId: account.platformId ?? null,
+            accountNumber: account.accountNumber ?? null,
+            meta: account.meta ?? null,
+            provider: account.provider ?? null,
+          };
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "accepted" });
+      expect(localAccounts).toEqual([
+        {
+          id: "needs-setup",
+          providerAccountId: "broker-account-needs-setup",
+          trackingMode: "NOT_SET",
+        },
+        { id: "created-local", providerAccountId: "broker-account-1", trackingMode: "HOLDINGS" },
+      ]);
+      expect(events).toEqual([
+        { name: "broker:sync-start" },
+        {
+          name: "broker:sync-complete",
+          payload: {
+            success: true,
+            message: "Sync completed. 1 accounts created, 0 activities synced, 0 holdings synced.",
+            connectionsSynced: {
+              synced: 1,
+              platformsCreated: 1,
+              platformsUpdated: 0,
+            },
+            accountsSynced: {
+              synced: 1,
+              created: 1,
+              updated: 0,
+              skipped: 0,
+              createdAccounts: [["created-local", "USD"]],
+              newAccountsInfo: [
+                {
+                  localAccountId: "created-local",
+                  providerAccountId: "broker-account-1",
+                  defaultName: "Broker Account",
+                  currency: "USD",
+                  institutionName: null,
+                },
+              ],
+            },
+            activitiesSynced: {
+              accountsSynced: 0,
+              activitiesUpserted: 0,
+              assetsInserted: 0,
+              accountsFailed: 0,
+              accountsWarned: 0,
+              newAssetIds: [],
+            },
+            holdingsSynced: {
+              accountsSynced: 0,
+              snapshotsUpserted: 0,
+              positionsUpserted: 0,
+              assetsInserted: 0,
+              accountsFailed: 0,
+              newAssetIds: [],
+            },
+            newAccounts: [
+              {
+                localAccountId: "needs-setup",
+                providerAccountId: "broker-account-needs-setup",
+                defaultName: "Broker Account",
+                currency: "USD",
+                institutionName: "brokerage",
+              },
+            ],
+          },
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      db.close();
+    }
+  });
+
+  test("emits broker sync error event when bounded activity sync has account failures", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE platforms (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT,
+        url TEXT NOT NULL,
+        external_id TEXT,
+        kind TEXT NOT NULL DEFAULT 'BROKERAGE',
+        website_url TEXT,
+        logo_url TEXT
+      );
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const eventBus = createEventBus();
+    const events: BackendEvent[] = [];
+    const unsubscribe = eventBus.subscribe((event) => events.push(event));
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      eventBus,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            email: "user@example.test",
+            team: { id: "team-1", plan: "pro", subscriptionStatus: "active" },
+          });
+        }
+        if (url.endsWith("/api/v1/sync/brokerage/connections")) {
+          return Response.json({ connections: [] });
+        }
+        if (url.endsWith("/api/v1/sync/brokerage/accounts")) {
+          return Response.json({ accounts: [] });
+        }
+        return Response.json({ data: {}, pagination: { has_more: false } });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        createAccount: async () => {
+          throw new Error("should not create accounts during failing activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "accepted" });
+      expect(events).toEqual([
+        { name: "broker:sync-start" },
+        {
+          name: "broker:sync-error",
+          payload: {
+            error:
+              "Sync completed. 0 accounts created, 0 activities synced, 0 holdings synced (1 failed).",
+          },
+        },
+      ]);
+    } finally {
+      unsubscribe();
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when the Connect plan lacks broker sync", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        requests.push(`${init?.method ?? "GET"} ${String(input)}`);
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return Response.json({
+            id: "user-1",
+            team: {
+              id: "team-1",
+              name: "Team",
+              plan: "basic",
+              subscription_status: "active",
+            },
+          });
+        }
+        throw new Error(`broker sync should not fetch ${String(input)}`);
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when forbidden");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
+      expect(requests).toEqual([
+        "POST https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "GET https://api.example.test/api/v1/user/me",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when entitlement user info has duplicate aliases", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).endsWith("/api/v1/user/me")) {
+          return new Response(
+            '{"id":"user-1","team":{"id":"team-1","plan":"pro","subscriptionStatus":"canceled","subscriptionStatus":"active"}}',
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        throw new Error(`broker sync should not fetch ${String(input)}`);
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when entitlement fails closed");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("forbids broker data sync when entitlement verification fails", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ code: "ENTITLEMENT_UNAVAILABLE" }, { status: 503 });
+      },
+      accountService: {
+        getBaseCurrency: () => "USD",
+        getAllAccounts: () => [],
+        createAccount: async () => {
+          throw new Error("should not create accounts when entitlement fails");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerData()).resolves.toEqual({ status: "forbidden" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs unresolved broker activities as review drafts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            { id: "activity-1", symbol: { symbol: "AAPL", raw_symbol: "AAPL" } },
+            {
+              id: "activity-2",
+              type: "BUY",
+              trade_date: "2026-01-06T10:00:00Z",
+              units: 3,
+              price: 40,
+              amount: 120,
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-review-1" }, { id: "created-review-2" }],
+            updated: [],
+            deleted: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 2,
+      });
+      const creates = bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined;
+      expect(creates).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+          metadata: expect.objectContaining({
+            symbol: expect.objectContaining({ symbol: "AAPL", raw_symbol: "AAPL" }),
+          }),
+        }),
+        expect.objectContaining({
+          activityType: "BUY",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-2",
+          quantity: "3",
+          unitPrice: "40",
+          amount: "120",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            {
+              sync_status: string;
+              last_error: string | null;
+              last_attempted_at: string | null;
+              updated_at: string;
+            },
+            []
+          >(
+            "SELECT sync_status, last_error, last_attempted_at, updated_at FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'",
+          )
+          .get(),
+      ).toEqual({
+        sync_status: "IDLE",
+        last_error: null,
+        last_attempted_at: expect.stringMatching(/\+00:00$/),
+        updated_at: expect.stringMatching(/\+00:00$/),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects unsafe local import-run pagination before database reads", () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      accountService: {
+        getAllAccounts: () => [],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("not used");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      expect(() =>
+        service.getImportRuns({
+          limit: Number.MAX_SAFE_INTEGER + 1,
+          offset: 0,
+        }),
+      ).toThrow("import run pagination values must be safe integers");
+      expect(() =>
+        service.getImportRuns({
+          limit: 50,
+          offset: Number.MAX_SAFE_INTEGER + 1,
+        }),
+      ).toThrow("import run pagination values must be safe integers");
+      expect(() =>
+        service.getImportRuns({
+          limit: 0,
+          offset: 0,
+        }),
+      ).toThrow("import run pagination limit must be greater than 0");
+      expect(() =>
+        service.getImportRuns({
+          limit: 50,
+          offset: -1,
+        }),
+      ).toThrow("import run pagination offset must be greater than or equal to 0");
+      expect(() =>
+        service.getImportRuns({
+          runType: "broker",
+          limit: 50,
+          offset: 0,
+        }),
+      ).toThrow("import run type must be SYNC or IMPORT");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs pure cash broker activities through activity bulk mutation", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              type: "DEPOSIT",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: -125.5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              external_reference_id: "external-1",
+              description: "Cash deposit",
+              needs_review: true,
+              needsReview: "ignored by Rust",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toEqual({
+        accountsSynced: 1,
+        activitiesUpserted: 1,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+      expect(bulkRequests).toEqual([
+        {
+          creates: [
+            expect.objectContaining({
+              accountId: "transaction-account",
+              activityType: "DEPOSIT",
+              activityDate: "2026-01-05T10:00:00Z",
+              amount: "125.5",
+              currency: "USD",
+              sourceSystem: "SNAPTRADE",
+              sourceRecordId: "external-1",
+              status: "DRAFT",
+              needsReview: true,
+              allowMissingAsset: true,
+            }),
+          ],
+          updates: [],
+          deleteIds: [],
+        },
+      ]);
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({ sync_status: "IDLE", last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips Rust-era broker activities matched by source identity", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE activities (
+        id TEXT PRIMARY KEY NOT NULL,
+        account_id TEXT NOT NULL,
+        source_system TEXT,
+        source_record_id TEXT,
+        idempotency_key TEXT
+      );
+      INSERT INTO activities (
+        id, account_id, source_system, source_record_id, idempotency_key
+      ) VALUES (
+        'legacy-activity-row', 'transaction-account', 'SNAPTRADE',
+        'legacy-source-record', NULL
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              type: "DEPOSIT",
+              source_record_id: "legacy-source-record",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 125.5,
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: () => {
+          throw new Error("should not duplicate legacy broker activity");
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 0,
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({ sync_status: "IDLE", last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips already imported pure cash broker activities during overlap sync", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      ) VALUES (
+        'transaction-account', 'SNAPTRADE', NULL, '2026-01-05T00:00:00.000Z',
+        '2026-01-05T00:00:00.000Z', NULL, NULL, 'IDLE',
+        '2026-01-05T00:00:00.000Z', '2026-01-05T00:00:00.000Z'
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              type: "DEPOSIT",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 125.5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+            {
+              id: "cash-activity-2",
+              type: "FEE",
+              trade_date: "2026-01-05T11:00:00Z",
+              amount: -5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: (keys) => ({
+          [keys.find((key) => key.endsWith(":cash-activity-1")) ?? ""]: "existing-activity",
+        }),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests).toHaveLength(1);
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          sourceRecordId: "cash-activity-2",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:cash-activity-2",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats duplicate broker cash bulk errors as benign fallback", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-activity-1",
+              type: "DEPOSIT",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 125.5,
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: () => ({
+          created: [],
+          updated: [],
+          deleted: [],
+          createdMappings: [],
+          errors: [
+            {
+              id: "cash-activity-1",
+              action: "create",
+              message: "Duplicate activity detected. A matching activity already exists.",
+            },
+          ],
+        }),
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 0,
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({ sync_status: "IDLE", last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs unknown broker activities without symbols as review drafts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "unknown-activity-1",
+              type: "UNKNOWN",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 42,
+              provider_type: "SNAPTRADE",
+              mapping_metadata: { confidence: 0.4, reasons: ["Unknown transaction type"] },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          status: "DRAFT",
+          needsReview: true,
+          currency: "CAD",
+          sourceRecordId: "unknown-activity-1",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:unknown-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("defaults missing broker activity types to unknown review drafts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "missing-type-activity-1",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 42,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          status: "DRAFT",
+          needsReview: true,
+          currency: "USD",
+          sourceRecordId: "missing-type-activity-1",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:missing-type-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs asset-backed broker activities when the symbol matches an existing asset", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic) VALUES
+        ('asset-aapl-us', 'AAPL', 'AAPL', 'XNYS'),
+        ('asset-aapl', 'AAPL', 'AAPL', 'XNAS');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              raw_type: "BUY_STOCK",
+              source_system: "SNAPTRADE",
+              source_record_id: "source-buy-activity-1",
+              source_group_id: "group-1",
+              external_reference_id: "external-buy-activity-1",
+              institution: "Example Brokerage",
+              provider_type: "SNAPTRADE",
+              mapping_metadata: {
+                confidence: 0.9,
+                reasons: ["Matched by symbol"],
+                flow: { is_external: true, isExternal: "ignored by Rust" },
+              },
+              symbol: {
+                id: "broker-symbol-aapl",
+                symbol: "AAPL",
+                raw_symbol: "AAPL",
+                figi_code: "BBG000B9XRY4",
+                exchange: { mic_code: "XNAS" },
+                type: { code: "EQUITY" },
+                currency: { code: "USD" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          asset: { id: "asset-aapl", symbol: "AAPL" },
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          sourceRecordId: "source-buy-activity-1",
+          sourceGroupId: "group-1",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:source-buy-activity-1",
+          metadata: expect.objectContaining({
+            raw_type: "BUY_STOCK",
+            source_system: "SNAPTRADE",
+            provider_type: "SNAPTRADE",
+            source_record_id: "source-buy-activity-1",
+            source_group_id: "group-1",
+            external_reference_id: "external-buy-activity-1",
+            institution: "Example Brokerage",
+            confidence: 0.9,
+            mapping_reasons: ["Matched by symbol"],
+            flow: { is_external: true },
+            symbol: {
+              id: "broker-symbol-aapl",
+              symbol: "AAPL",
+              raw_symbol: "AAPL",
+              figi_code: "BBG000B9XRY4",
+              exchange_mic: "XNAS",
+              symbol_type_code: "EQUITY",
+              currency_code: "USD",
+            },
+          }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs dividend broker activities when the symbol matches an existing asset", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-aapl', 'AAPL', 'AAPL');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "dividend-activity-1",
+              type: "DIVIDEND",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 12.34,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-dividend" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "DIVIDEND",
+          asset: { id: "asset-aapl", symbol: "AAPL" },
+          amount: "12.34",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:dividend-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs security transfer broker activities when the symbol matches an existing asset", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-aapl', 'AAPL', 'AAPL');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "transfer-activity-1",
+              type: "TRANSFER_IN",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 3,
+              price: 150,
+              amount: 450,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-transfer" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "TRANSFER_IN",
+          asset: { id: "asset-aapl", symbol: "AAPL" },
+          quantity: "3",
+          unitPrice: "150",
+          amount: "450",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:transfer-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs asset-backed interest broker activities when the symbol matches an existing asset", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-btc', 'BTC', 'BTC');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "interest-activity-1",
+              type: "INTEREST",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 0.01,
+              currency: { code: "BTC" },
+              provider_type: "SNAPTRADE",
+              symbol: { raw_symbol: "   ", symbol: "BTC-USD", type: { code: "CRYPTOCURRENCY" } },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-interest" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "INTEREST",
+          asset: { id: "asset-btc", symbol: "BTC" },
+          amount: "0.01",
+          currency: "BTC",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:interest-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps asset-backed interest when raw symbol is blank but display symbol is present", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-btc', 'BTC', 'BTC');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "interest-blank-raw-activity-1",
+              type: "INTEREST",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 0.01,
+              currency: { code: "BTC" },
+              provider_type: "SNAPTRADE",
+              symbol: { raw_symbol: "", symbol: "BTC-USD", type: { code: "CRYPTOCURRENCY" } },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-interest" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "INTEREST",
+          asset: { id: "asset-btc", symbol: "BTC" },
+          amount: "0.01",
+          currency: "BTC",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:interest-blank-raw-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs symbol-less dividend broker activities as cash income", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-dividend-activity-1",
+              type: "DIVIDEND",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 12.34,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-cash-dividend" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "DIVIDEND",
+          amount: "12.34",
+          allowMissingAsset: true,
+          sourceRecordId: "cash-dividend-activity-1",
+        }),
+      ]);
+      expect((bulkRequests[0]?.creates as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+        "asset",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs adjustment broker activities with optional asset identity", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES ('asset-aapl', 'AAPL', 'AAPL');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-adjustment-activity-1",
+              type: "ADJUSTMENT",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 12.34,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+            },
+            {
+              id: "asset-adjustment-activity-1",
+              type: "ADJUSTMENT",
+              trade_date: "2026-01-05T11:00:00Z",
+              amount: 1.5,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-cash-adjustment" }, { id: "created-asset-adjustment" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 2,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "ADJUSTMENT",
+          amount: "12.34",
+          allowMissingAsset: true,
+          sourceRecordId: "cash-adjustment-activity-1",
+        }),
+        expect.objectContaining({
+          activityType: "ADJUSTMENT",
+          asset: { id: "asset-aapl", symbol: "AAPL" },
+          amount: "1.5",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:asset-adjustment-activity-1",
+        }),
+      ]);
+      expect((bulkRequests[0]?.creates as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+        "asset",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches existing broker assets after Yahoo suffix normalization", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic) VALUES
+        ('asset-shop-us', 'SHOP', 'SHOP', 'XNYS'),
+        ('asset-shop', 'SHOP', 'SHOP', 'XTSE');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 75,
+              amount: 150,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "SHOP.TO", raw_symbol: "   " },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          asset: { id: "asset-shop", symbol: "SHOP" },
+          currency: "CAD",
+          idempotencyKey: "broker:SNAPTRADE:transaction-account:buy-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("creates suffixed broker symbols when only another exchange is local", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic)
+      VALUES ('asset-shop-us', 'SHOP', 'SHOP', 'XNYS');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 75,
+              amount: 150,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "SHOP.TO" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          currency: "CAD",
+          asset: {
+            symbol: "SHOP",
+            exchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches existing crypto broker assets by base symbol", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol) VALUES
+        ('asset-btc', 'BTC', 'BTC'),
+        ('asset-x', 'X', 'X'),
+        ('asset-x-ai', 'X-AI', 'X-AI');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "crypto-buy-blank-raw-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 0.1,
+              price: 100000,
+              amount: 10000,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "BTC-USD", raw_symbol: "", type: { code: "CRYPTOCURRENCY" } },
+            },
+            {
+              id: "crypto-buy-raw-pair-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T11:00:00Z",
+              units: 1,
+              price: 10,
+              amount: 10,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "WRONG-USD",
+                raw_symbol: "X-AI-USD",
+                type: { code: "CRYPTOCURRENCY" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-btc" }, { id: "created-x-ai" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 2,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          asset: { id: "asset-btc", symbol: "BTC" },
+          quantity: "0.1",
+          unitPrice: "100000",
+        }),
+        expect.objectContaining({
+          activityType: "BUY",
+          asset: { id: "asset-x-ai", symbol: "X-AI" },
+          quantity: "1",
+          unitPrice: "10",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats blank broker symbols on transfers as cash activities", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "cash-transfer-blank-symbol-1",
+              type: "TRANSFER_IN",
+              trade_date: "2026-01-05T10:00:00Z",
+              amount: 100,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { raw_symbol: "   ", symbol: "   " },
+              option_symbol: { ticker: "" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-cash-transfer" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "TRANSFER_IN",
+          amount: "100",
+          allowMissingAsset: true,
+          sourceRecordId: "cash-transfer-blank-symbol-1",
+        }),
+      ]);
+      expect((bulkRequests[0]?.creates as Array<Record<string, unknown>>)[0]).not.toHaveProperty(
+        "asset",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs asset-backed broker activities as review drafts when the symbol is not local", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          currency: "USD",
+          sourceRecordId: "buy-activity-1",
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs broker exchange-MIC activities without provider search", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "AAPL",
+                raw_symbol: "AAPL",
+                description: "Apple Inc.",
+                exchange: { mic_code: "XNAS" },
+                currency: { code: "USD" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          currency: "USD",
+          asset: {
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            name: "Apple Inc.",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs provider-resolved broker activities as new activity-created assets", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const symbolSearchCalls: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-activity-1",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+            {
+              id: "buy-activity-2",
+              type: "BUY",
+              trade_date: "2026-01-06T10:00:00Z",
+              units: 1,
+              price: 151,
+              amount: 151,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) => {
+        symbolSearchCalls.push(query);
+        return query === "AAPL"
+          ? [
+              {
+                symbol: "MSFT",
+                shortName: "Microsoft Corporation",
+                longName: "Microsoft Corporation",
+                exchange: "NMS",
+                exchangeMic: "XNAS",
+                exchangeName: "NASDAQ",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+              {
+                symbol: "AAPL",
+                shortName: "Apple Inc.",
+                longName: "Apple Inc.",
+                exchange: "NMS",
+                exchangeMic: "XNAS",
+                exchangeName: "NASDAQ",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 99,
+              },
+            ]
+          : [];
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          const result = {
+            created: [{ id: "created-activity-1" }, { id: "created-activity-2" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+          Object.defineProperty(result, ACTIVITY_BULK_CREATED_ASSET_IDS, {
+            value: ["asset-aapl"],
+            enumerable: false,
+          });
+          return result;
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 2,
+        assetsInserted: 1,
+        newAssetIds: ["asset-aapl"],
+      });
+      expect(symbolSearchCalls).toEqual(["AAPL"]);
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          quantity: "2",
+          unitPrice: "150",
+          amount: "300",
+          currency: "USD",
+          asset: {
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+            instrumentType: "EQUITY",
+            quoteCcy: "USD",
+            quoteMode: "MARKET",
+            name: "Apple Inc.",
+          },
+        }),
+        expect.objectContaining({
+          accountId: "transaction-account",
+          activityType: "BUY",
+          quantity: "1",
+          unitPrice: "151",
+          amount: "151",
+          currency: "USD",
+          asset: expect.objectContaining({
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+          }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("provider-resolves suffixed broker raw symbols by normalized symbol and MIC", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-shop-tsx",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 95,
+              amount: 190,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "SHOP",
+                raw_symbol: "SHOP.TO",
+                exchange: { mic_code: "XTSE" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "SHOP.TO"
+          ? [
+              {
+                symbol: "SHOP.TO",
+                shortName: "Shopify Inc.",
+                longName: "Shopify Inc.",
+                exchange: "TOR",
+                exchangeMic: "XTSE",
+                exchangeName: "TSX",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "CAD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          asset: {
+            symbol: "SHOP.TO",
+            exchangeMic: "XTSE",
+            instrumentType: "EQUITY",
+            quoteCcy: "CAD",
+            quoteMode: "MARKET",
+            name: "Shopify Inc.",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("provider-resolves crypto broker pairs by base symbol", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-btc",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 0.5,
+              price: 90000,
+              amount: 45000,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "BTC-USD",
+                raw_symbol: "BTC-USD",
+                type: { code: "CRYPTOCURRENCY" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "CRYPTO",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "BTC"
+          ? [
+              {
+                symbol: "BTC-USD",
+                shortName: "Bitcoin USD",
+                longName: "Bitcoin USD",
+                exchange: "CCC",
+                exchangeMic: null,
+                exchangeName: null,
+                quoteType: "CRYPTOCURRENCY",
+                typeDisplay: "Crypto",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          asset: {
+            symbol: "BTC-USD",
+            exchangeMic: undefined,
+            instrumentType: "CRYPTO",
+            quoteCcy: "USD",
+            quoteMode: "MARKET",
+            name: "Bitcoin USD",
+          },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses provider search existingAssetId for suffixed broker symbols", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol, instrument_exchange_mic)
+      VALUES ('asset-shop', 'SHOP', 'SHOP', 'XTSE');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      exchangeMetadata: { yahooSuffixToMic: new Map([["TO", "XTSE"]]) },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "buy-shop-existing",
+              type: "BUY",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 95,
+              amount: 190,
+              currency: { code: "CAD" },
+              provider_type: "SNAPTRADE",
+              symbol: {
+                symbol: "SHOP",
+                raw_symbol: "SHOP.TO",
+                exchange: { mic_code: "XTSE" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "CAD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "SHOP.TO"
+          ? [
+              {
+                symbol: "SHOP.TO",
+                shortName: "Shopify Inc.",
+                longName: "Shopify Inc.",
+                exchange: "TOR",
+                exchangeMic: "XTSE",
+                exchangeName: "TSX",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "CAD",
+                dataSource: "YAHOO",
+                isExisting: true,
+                existingAssetId: "asset-shop",
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+        assetsInserted: 0,
+        newAssetIds: [],
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          asset: { id: "asset-shop", symbol: "SHOP.TO" },
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs symbol-bearing broker activities with missing type as review drafts", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT,
+        instrument_exchange_mic TEXT
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "missing-type-aapl",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 2,
+              price: 150,
+              amount: 300,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      symbolSearch: (query) =>
+        query === "AAPL"
+          ? [
+              {
+                symbol: "AAPL",
+                shortName: "Apple Inc.",
+                longName: "Apple Inc.",
+                exchange: "NMS",
+                exchangeMic: "XNAS",
+                exchangeName: "NASDAQ",
+                quoteType: "EQUITY",
+                typeDisplay: "Equity",
+                currency: "USD",
+                dataSource: "YAHOO",
+                isExisting: false,
+                existingAssetId: null,
+                index: "",
+                score: 100,
+              },
+            ]
+          : [],
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-activity" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          status: "DRAFT",
+          needsReview: true,
+          asset: expect.objectContaining({
+            symbol: "AAPL",
+            exchangeMic: "XNAS",
+          }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs option broker activities when the compact OCC symbol matches an existing asset", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      CREATE TABLE assets (
+        id TEXT PRIMARY KEY NOT NULL,
+        display_code TEXT,
+        instrument_symbol TEXT
+      );
+      INSERT INTO assets (id, display_code, instrument_symbol)
+      VALUES ('option-aapl', 'AAPL261218C00240000', 'AAPL261218C00240000');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [
+            {
+              id: "option-activity-1",
+              type: "BUY",
+              option_type: "BUY_TO_OPEN",
+              trade_date: "2026-01-05T10:00:00Z",
+              units: 1,
+              price: 12.5,
+              amount: 1250,
+              currency: { code: "USD" },
+              provider_type: "SNAPTRADE",
+              option_symbol: {
+                ticker: "AAPL  261218C00240000",
+                option_type: "CALL",
+                underlying_symbol: { symbol: "AAPL" },
+              },
+            },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        checkExistingDuplicates: () => ({}),
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return {
+            created: [{ id: "created-option" }],
+            updated: [],
+            deleted: [],
+            createdMappings: [],
+            errors: [],
+          };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "BUY",
+          subtype: "BUY_TO_OPEN",
+          asset: { id: "option-aapl", symbol: "AAPL261218C00240000" },
+          quantity: "1",
+          unitPrice: "12.5",
+          amount: "1250",
+          metadata: expect.objectContaining({
+            option_leg_type: "BUY_TO_OPEN",
+            option_contract_type: "CALL",
+            option_ticker: "AAPL  261218C00240000",
+            option_underlying_symbol: "AAPL",
+          }),
+        }),
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("recognizes broker activity page data aliases before review-draft import", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          universalActivities: [
+            { id: "activity-1", symbol: { symbol: "AAPL", raw_symbol: "AAPL" } },
+          ],
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 1,
+        accountsFailed: 0,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "IDLE",
+        last_error: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records broker activity failure for duplicate page aliases", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let pageBody =
+      '{"data":[],"universalActivities":[{"id":"activity-1"}],"pagination":{"has_more":false}}';
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return new Response(pageBody, { headers: { "content-type": "application/json" } });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "FAILED",
+        last_error: "Failed to parse broker activity page response",
+      });
+      pageBody = '{"data":[],"pagination":{"has_more":"false"}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = "[]";
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":{},"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[123],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[],"pagination":"page"}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[],"pagination":{"has_more":false,"limit":1000.0}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","trade_date":"2026-01-01","trade_date":"2026-01-02"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","trade_date":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","option_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","raw_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":"AAPL","raw_symbol":"MSFT"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":{"raw_symbol":"AAPL","raw_symbol":"MSFT"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"symbol":"AAPL","type":{"code":"EQUITY","is_supported":"true"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody = '{"data":[{"id":"activity-1","symbol":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"raw_symbol":123}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"exchange":{"mic_code":123}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","symbol":{"symbol":"AAPL","exchange":"XNAS"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","strike_price":"240"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","option_type":123}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","is_mini_option":"false"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":"AAPL  261218C00240000"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","underlying_symbol":"AAPL"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","option_symbol":{"ticker":"AAPL  261218C00240000","strike_price":1e999}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":true,"is_external":false}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":"true"}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":{"is_external":null}}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"flow":"external"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"reasons":"Unknown transaction type"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"reasons":["Unknown transaction type",123]}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"confidence":"0.9"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","amount":"100"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","fx_rate":"1.25"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","source_record_id":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","provider_type":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","external_reference_id":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","amount":1e999}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":123}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":"USD"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":{"id":123,"code":"USD"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","currency":{"code":"USD","code":"CAD"}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","needs_review":"true"}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","needs_review":null}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      pageBody =
+        '{"data":[{"id":"activity-1","type":"BUY","mapping_metadata":{"confidence":1e999}}],"pagination":{"has_more":false}}';
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs transaction accounts with empty broker activity pages", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+      INSERT INTO brokers_sync_state (
+        account_id, provider, checkpoint_json, last_attempted_at, last_successful_at,
+        last_error, last_run_id, sync_status, created_at, updated_at
+      ) VALUES (
+        'transaction-account', 'SNAPTRADE', NULL, '2026-01-09T00:00:00Z',
+        '2026-01-10T00:00:00Z', NULL, NULL, 'IDLE',
+        '2026-01-09T00:00:00Z', '2026-01-09T00:00:00Z'
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ data: [], pagination: { hasMore: "ignored by Rust" } });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toEqual({
+        accountsSynced: 1,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+      const activityUrl = new URL(requests[1] ?? "");
+      expect(activityUrl.pathname).toBe(
+        "/api/v1/sync/brokerage/accounts/provider-account/activities",
+      );
+      expect([...activityUrl.searchParams.entries()].map(([key]) => key)).toEqual([
+        "offset",
+        "limit",
+        "start_date",
+        "end_date",
+      ]);
+      expect(activityUrl.searchParams.get("offset")).toBe("0");
+      expect(activityUrl.searchParams.get("limit")).toBe("1000");
+      expect(activityUrl.searchParams.get("start_date")).toBe("2026-01-09");
+      const row = db
+        .query<
+          {
+            sync_status: string;
+            last_attempted_at: string | null;
+            last_successful_at: string | null;
+            last_error: string | null;
+            updated_at: string;
+          },
+          []
+        >(
+          "SELECT sync_status, last_attempted_at, last_successful_at, last_error, updated_at FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'",
+        )
+        .get();
+      expect(row?.sync_status).toBe("IDLE");
+      expect(row?.last_attempted_at).toMatch(/\+00:00$/);
+      expect(row?.last_successful_at).toMatch(/\+00:00$/);
+      expect(row?.updated_at).toMatch(/\+00:00$/);
+      expect(row?.last_error).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips non-empty broker activity pages when every activity lacks a mappable id", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("offset=0")) {
+          return Response.json({
+            data: [
+              {
+                description: "missing id",
+                symbol: {
+                  rawSymbol: 123,
+                  figiCode: 123,
+                  symbolType: { code: "IGNORED" },
+                  currency: { code: "USD", description: 123, is_supported: "true" },
+                  exchange: { code: "XNAS", micCode: 123, is_supported: "true" },
+                  type: { code: "EQUITY", name: 123, is_supported: true, isSupported: "true" },
+                },
+                mapping_metadata: { flow: { isExternal: "true" } },
+                mappingMetadata: { confidence: "ignored by Rust" },
+                needsReview: "true",
+                fxRate: "1.25",
+                sourceSystem: 123,
+                sourceRecordId: 123,
+                sourceGroupId: 123,
+                providerType: 123,
+                externalReferenceId: 123,
+                activityType: 123,
+                rawType: 123,
+                optionType: 123,
+                tradeDate: 123,
+                settlementDate: 123,
+                optionSymbol: "ignored by Rust",
+                option_symbol: {
+                  optionType: 123,
+                  strikePrice: "240",
+                  expirationDate: 123,
+                  isMiniOption: "false",
+                  underlyingSymbol: "AAPL",
+                },
+              },
+              {
+                id: "   ",
+                description: "blank id",
+                currency: null,
+                symbol: null,
+                option_symbol: null,
+                mapping_metadata: null,
+              },
+            ],
+            pagination: { has_more: true },
+          });
+        }
+        return Response.json({
+          data: [],
+          pagination: { has_more: false },
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toEqual({
+        accountsSynced: 1,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 0,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "IDLE",
+        last_error: null,
+      });
+      const activityRequests = requests.filter((request) =>
+        request.includes("/api/v1/sync/brokerage/accounts/provider-account/activities?"),
+      );
+      expect(activityRequests).toHaveLength(2);
+      const firstActivityUrl = new URL(activityRequests[0] ?? "");
+      const secondActivityUrl = new URL(activityRequests[1] ?? "");
+      expect([...firstActivityUrl.searchParams.entries()].map(([key]) => key)).toEqual([
+        "offset",
+        "limit",
+        "end_date",
+      ]);
+      expect(firstActivityUrl.searchParams.get("offset")).toBe("0");
+      expect(secondActivityUrl.searchParams.get("offset")).toBe("2");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records broker activity failure when pagination is stuck", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          data: [{ id: "   ", description: "unmapped" }],
+          pagination: { has_more: true },
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "FAILED",
+        last_error:
+          "Pagination appears stuck (same first activity id returned for multiple pages).",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("runs stuck pagination guard after unresolved review-draft imports", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const bulkRequests: Record<string, unknown>[] = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("offset=0")) {
+          return Response.json({
+            data: [{ id: "   ", description: "unmapped" }],
+            pagination: { has_more: true },
+          });
+        }
+        return Response.json({
+          data: [
+            { id: "   ", description: "same first id" },
+            {
+              id: "activity-1",
+              description: "mappable",
+              symbol: { symbol: "AAPL", raw_symbol: "AAPL" },
+            },
+          ],
+          pagination: { has_more: false },
+        });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+        bulkMutateActivities: (request) => {
+          bulkRequests.push(request);
+          return { created: [{ id: "created-review" }], updated: [], deleted: [], errors: [] };
+        },
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        accountsFailed: 1,
+        activitiesUpserted: 1,
+      });
+      expect(bulkRequests[0]?.creates as Array<Record<string, unknown>> | undefined).toEqual([
+        expect.objectContaining({
+          activityType: "UNKNOWN",
+          allowMissingAsset: true,
+          status: "DRAFT",
+          needsReview: true,
+          sourceRecordId: "activity-1",
+        }),
+      ]);
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toEqual({
+        sync_status: "FAILED",
+        last_error:
+          "Pagination appears stuck (same first activity id returned for multiple pages).",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records per-account failure when broker activity page fetch fails", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE brokers_sync_state (
+        account_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        checkpoint_json TEXT,
+        last_attempted_at TEXT,
+        last_successful_at TEXT,
+        last_error TEXT,
+        last_run_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'IDLE',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, provider)
+      );
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ message: "upstream unavailable" }, { status: 503 });
+      },
+      accountService: {
+        getAllAccounts: () => [
+          {
+            id: "transaction-account",
+            name: "Transactions",
+            accountType: "SECURITIES",
+            group: null,
+            currency: "USD",
+            isDefault: false,
+            isActive: true,
+            isArchived: false,
+            trackingMode: "TRANSACTIONS",
+            createdAt: "",
+            updatedAt: "",
+            platformId: null,
+            accountNumber: null,
+            meta: null,
+            provider: "SNAPTRADE",
+            providerAccountId: "provider-account",
+          },
+        ],
+        getBaseCurrency: () => "USD",
+        createAccount: async () => {
+          throw new Error("should not create accounts during activity sync");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.syncBrokerActivities()).resolves.toMatchObject({
+        accountsSynced: 0,
+        activitiesUpserted: 0,
+        assetsInserted: 0,
+        accountsFailed: 1,
+        accountsWarned: 0,
+        newAssetIds: [],
+      });
+      expect(
+        db
+          .query<
+            { sync_status: string; last_error: string | null },
+            []
+          >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
+          .get(),
+      ).toMatchObject({
+        sync_status: "FAILED",
+        last_error: expect.stringMatching(
+          /^API error 503: upstream unavailable \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("TS Connect device sync local service", () => {
+  test("returns local FRESH sync state after restoring a Connect session without sync identity", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: {
+        CONNECT_AUTH_URL: "https://auth.example.test",
+        CONNECT_AUTH_PUBLISHABLE_KEY: "publishable-key",
+      },
+      fetch: async (input) => {
+        requests.push(String(input));
+        return Response.json({ access_token: "access-token" });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toEqual({
+        state: "FRESH",
+        deviceId: null,
+        deviceName: null,
+        keyVersion: null,
+        serverKeyVersion: null,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+      expect(requests).toEqual([
+        "https://auth.example.test/auth/v1/token?grant_type=refresh_token",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns local FRESH sync state when identity has nonce but no device id", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1" }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "FRESH",
+        deviceId: null,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed sync identity during local device sync state checks", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: null, deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"deviceId":"device-1","keyVersion":1e0}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"vers\\u0069on":2.0,"deviceId":"device-1"}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        '{"version":2,"keyVersion":1,"keyVersion":1e0,"deviceId":"device-1"}',
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set("sync_identity", '{"version":2,"version":3,"deviceId":"device-1"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set("sync_identity", '{"version":2,"deviceId":"a","deviceId":"b"}');
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1", keyVersion: 1.5 }),
+      );
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse identity",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requires a Connect session before local device sync state checks", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requires a Connect session before enable and returns existing sync state when configured", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+      await expect(service.reinitializeDeviceSync()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("enables FRESH device sync through bootstrap key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: Array<{ url: string; method: string; body: Record<string, unknown> | null }> =
+      [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      appVersion: "3.4.0",
+      reinitializeDelayMs: 0,
+      fetch: async (input, init) => {
+        const body =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : null;
+        requests.push({ url: String(input), method: init?.method ?? "GET", body });
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 3,
+        serverKeyVersion: 3,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+
+      const enrollBody = requests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/devices"),
+      )?.body;
+      expect(enrollBody).toMatchObject({
+        display_name: "Wealthfolio Server",
+        platform:
+          process.platform === "darwin"
+            ? "mac"
+            : process.platform === "win32"
+              ? "windows"
+              : process.platform === "linux"
+                ? "linux"
+                : "web",
+        app_version: "3.4.0",
+      });
+      expect(typeof enrollBody?.device_nonce).toBe("string");
+
+      const commitBody = requests.find((request) =>
+        request.url.endsWith("/api/v1/sync/team/keys/initialize/commit"),
+      )?.body;
+      expect(commitBody).toMatchObject({
+        device_id: "device-1",
+        key_version: 3,
+        challenge_response: "f5d35df7861e15897ad1fe167b9b76a5c6d01afe9d4cb565c2f0166ea49d61b7",
+      });
+      expect(typeof commitBody?.device_key_envelope).toBe("string");
+      expect(typeof commitBody?.signature).toBe("string");
+      expect(commitBody).not.toHaveProperty("recovery_envelope");
+
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        keyVersion: 3,
+      });
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(typeof identity.rootKey).toBe("string");
+      expect(typeof identity.deviceSecretKey).toBe("string");
+      expect(typeof identity.devicePublicKey).toBe("string");
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toMatchObject({ cursor: 0 });
+      expect(
+        db
+          .query<
+            {
+              key_version: number;
+              trust_state: string;
+              last_bootstrap_at: string | null;
+              min_snapshot_created_at: string | null;
+            },
+            []
+          >(
+            "SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'",
+          )
+          .get(),
+      ).toMatchObject({
+        key_version: 3,
+        trust_state: "trusted",
+        min_snapshot_created_at: null,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toMatchObject({ count: 0 });
+      expect(
+        db
+          .query<
+            { lock_version: number; last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT lock_version, last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({ lock_version: 0, last_cycle_status: null, last_error: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not fail enable sync when legacy device id persistence fails", async () => {
+    const db = createDeviceSyncStateDb();
+    const baseSecretService = createMemorySecretService();
+    baseSecretService.entries.set("sync_refresh_token", "refresh-token");
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService: {
+        ...baseSecretService,
+        setSecret(secretKey, secret) {
+          if (secretKey === "sync_device_id") {
+            throw new Error("legacy keyring unavailable");
+          }
+          baseSecretService.entries.set(secretKey, secret);
+        },
+      },
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      appVersion: "3.4.0",
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "PAIR",
+            device_id: "device-1",
+            e2ee_key_version: 4,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+            ],
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toMatchObject({
+        deviceId: "device-1",
+        state: "REGISTERED",
+      });
+      expect(JSON.parse(baseSecretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: null,
+        keyVersion: null,
+      });
+      expect(baseSecretService.entries.has("sync_device_id")).toBe(false);
+      expect(warnings).toEqual([
+        "[Connect] Failed to store legacy sync device ID: legacy keyring unavailable",
+      ]);
+    } finally {
+      console.warn = originalWarn;
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect enrollment response tokens before storing identity", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let enrollResponse =
+      '{"mode":"READY","device_id":"device-1","e2ee_key_version":2.0,"trust_state":"trusted"}';
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return new Response(enrollResponse, {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
+      expect(secretService.entries.get("sync_identity")).toMatch(/"deviceId":null/);
+
+      enrollResponse =
+        '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"e2eeKeyVersion":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[]}';
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
+
+      enrollResponse =
+        '{"mode":"PAIR","device_id":"device-1","e2ee_key_version":2,"require_sas":true,"pairing_ttl_seconds":60,"trusted_devices":[{"id":"device-2","name":"iPhone","platform":"ios","last_seen_at":null,"lastSeenAt":null}]}';
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse enroll response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect initialize keys response before storing trusted identity", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let initializeResponse =
+      '{"mode":"BOOTSTRAP","challenge":"challenge-1","nonce":"nonce-1","key_version":3.0}';
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return new Response(initializeResponse, {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+      const identityAfterFailedInitialize = JSON.parse(
+        secretService.entries.get("sync_identity") ?? "{}",
+      ) as Record<string, unknown>;
+      expect(identityAfterFailedInitialize.deviceId).toBe("device-1");
+      expect(identityAfterFailedInitialize.rootKey).toBe(null);
+
+      const duplicateSecretService = createMemorySecretService();
+      duplicateSecretService.entries.set("sync_refresh_token", "refresh-token");
+      initializeResponse =
+        '{"mode":"BOOTSTRAP","challenge":"challenge-1","challenge":"challenge-2","nonce":"nonce-1","key_version":3}';
+      const duplicateService = createLocalConnectDeviceSyncService({
+        db,
+        secretService: duplicateSecretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices")) {
+            return Response.json({
+              mode: "BOOTSTRAP",
+              device_id: "device-1",
+              e2ee_key_version: 3,
+            });
+          }
+          if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+            return new Response(initializeResponse, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          throw new Error(`unexpected request: ${url}`);
+        },
+      });
+      await expect(duplicateService.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+
+      const duplicateTrustedDeviceSecretService = createMemorySecretService();
+      duplicateTrustedDeviceSecretService.entries.set("sync_refresh_token", "refresh-token");
+      initializeResponse =
+        '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[{"id":"device-2","name":"iPhone","name":"iPad","platform":"ios","last_seen_at":null}]}';
+      const duplicateTrustedDeviceService = createLocalConnectDeviceSyncService({
+        db,
+        secretService: duplicateTrustedDeviceSecretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices")) {
+            return Response.json({
+              mode: "BOOTSTRAP",
+              device_id: "device-1",
+              e2ee_key_version: 3,
+            });
+          }
+          if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+            return new Response(initializeResponse, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          throw new Error(`unexpected request: ${url}`);
+        },
+      });
+      await expect(duplicateTrustedDeviceService.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect trusted device summaries during key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 3,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "PAIRING_REQUIRED",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: 123 },
+            ],
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse initialize keys response",
+        status: 500,
+      });
+      const identityAfterFailedInitialize = JSON.parse(
+        secretService.entries.get("sync_identity") ?? "{}",
+      ) as Record<string, unknown>;
+      expect(identityAfterFailedInitialize.deviceId).toBe("device-1");
+      expect(identityAfterFailedInitialize.rootKey).toBe(null);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect commit initialize keys response before storing trusted identity", async () => {
+    async function expectRejectedCommitResponse(commitResponse: string): Promise<void> {
+      const db = createDeviceSyncStateDb();
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      const service = createLocalConnectDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices")) {
+            return Response.json({
+              mode: "BOOTSTRAP",
+              device_id: "device-1",
+              e2ee_key_version: 3,
+            });
+          }
+          if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+            return Response.json({
+              mode: "BOOTSTRAP",
+              challenge: "challenge-1",
+              nonce: "nonce-1",
+              key_version: 3,
+            });
+          }
+          if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+            return new Response(commitResponse, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          throw new Error(`unexpected request: ${url}`);
+        },
+      });
+
+      try {
+        await expect(service.enableDeviceSync()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse commit initialize keys response",
+          status: 500,
+        });
+        const identityAfterFailedCommit = JSON.parse(
+          secretService.entries.get("sync_identity") ?? "{}",
+        ) as Record<string, unknown>;
+        expect(identityAfterFailedCommit.deviceId).toBe("device-1");
+        expect(identityAfterFailedCommit.rootKey).toBe(null);
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectRejectedCommitResponse('{"success":true}');
+    await expectRejectedCommitResponse('{"success":true,"success":false,"key_state":"ACTIVE"}');
+    await expectRejectedCommitResponse('{"success":true,"key_state":"ACTIVE","keyState":"ACTIVE"}');
+  });
+
+  test("adds a missing legacy device nonce before resuming existing sync", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: "legacy-root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: Array<{ url: string; method: string }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({ url, method: init?.method ?? "GET" });
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-1")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "READY",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        needsPairing: false,
+        trustedDevices: [],
+      });
+      expect(requests.some((request) => request.url.endsWith("/api/v1/sync/team/devices"))).toBe(
+        false,
+      );
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(identity).toMatchObject({
+        deviceId: "device-1",
+        rootKey: "legacy-root-key",
+        keyVersion: 2,
+      });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed Connect device response aliases during sync state reads", async () => {
+    async function expectRejectedDeviceResponse(deviceResponse: string): Promise<void> {
+      const db = createDeviceSyncStateDb();
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      const service = createLocalConnectDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response(deviceResponse, { headers: { "content-type": "application/json" } });
+        },
+      });
+
+      try {
+        await expect(service.getDeviceSyncState()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse device response",
+          status: 500,
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","displayName":"Other","platform":"mac","trust_state":"trusted","trusted_key_version":2}',
+    );
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":2,"trustedKeyVersion":2}',
+    );
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":2,"last_seen_at":123}',
+    );
+    await expectRejectedDeviceResponse(
+      '{"id":"device-1","display_name":"MacBook","platform":"mac","trust_state":"trusted","trusted_key_version":1e999}',
+    );
+  });
+
+  test("ignores malformed Connect trusted-device list aliases during sync state reads", async () => {
+    async function expectMalformedListKeepsOrphaned(listResponse: string): Promise<void> {
+      const db = createDeviceSyncStateDb();
+      const secretService = createMemorySecretService();
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+        }),
+      );
+      const service = createLocalConnectDeviceSyncService({
+        db,
+        secretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        fetch: async (input) => {
+          const url = String(input);
+          if (url.includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
+            return new Response(listResponse, { headers: { "content-type": "application/json" } });
+          }
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "untrusted",
+            trusted_key_version: 2,
+          });
+        },
+      });
+
+      try {
+        await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+          state: "ORPHANED",
+          deviceId: "device-1",
+          trustedDevices: [],
+        });
+      } finally {
+        db.close();
+      }
+    }
+
+    await expectMalformedListKeepsOrphaned(
+      '[null,{"id":"trusted-device","display_name":"iPhone","displayName":"Other","platform":"ios","trust_state":"trusted","last_seen_at":null}]',
+    );
+    await expectMalformedListKeepsOrphaned(
+      '[{"id":"trusted-device","display_name":"iPhone","platform":"ios","trust_state":"trusted","os_version":123}]',
+    );
+  });
+
+  test("ignores malformed Connect orphan-detection initialize responses during sync state reads", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
+          return Response.json([]);
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return new Response(
+            '{"mode":"PAIRING_REQUIRED","e2ee_key_version":3,"e2eeKeyVersion":3,"require_sas":true,"pairing_ttl_seconds":300,"trusted_devices":[]}',
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "untrusted",
+        });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        trustedDevices: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("serializes Connect token restoration during concurrent state and enable calls", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let activeTokenRestores = 0;
+    let maxActiveTokenRestores = 0;
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push(`${init?.method ?? "GET"} ${url}`);
+        if (url.includes("/auth/v1/token")) {
+          activeTokenRestores += 1;
+          maxActiveTokenRestores = Math.max(maxActiveTokenRestores, activeTokenRestores);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          activeTokenRestores -= 1;
+          return Response.json({
+            access_token: "access-token",
+            refresh_token: "rotated-refresh-token",
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices/device-1")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            platform: "mac",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.getDeviceSyncState(), service.enableDeviceSync()]),
+      ).resolves.toHaveLength(2);
+      expect(maxActiveTokenRestores).toBe(1);
+      expect(requests.filter((request) => request.includes("/auth/v1/token"))).toHaveLength(2);
+      expect(requests.filter((request) => request.endsWith("/api/v1/sync/team/devices"))).toEqual([
+        "POST https://api.example.test/api/v1/sync/team/devices",
+      ]);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh-token");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("shares Connect token restoration between Connect and device-sync services", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    let tokenRequests = 0;
+    let activeTokenRestores = 0;
+    let maxActiveTokenRestores = 0;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/auth/v1/token")) {
+        tokenRequests += 1;
+        activeTokenRestores += 1;
+        maxActiveTokenRestores = Math.max(maxActiveTokenRestores, activeTokenRestores);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        activeTokenRestores -= 1;
+        return Response.json({
+          access_token: "access-token",
+          refresh_token: "rotated-refresh-token",
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+    const connectService = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: fetchImpl,
+      accountService: {
+        getAllAccounts: () => [],
+        getBaseCurrency: () => "USD",
+        createAccount: () => {
+          throw new Error("not used");
+        },
+      },
+      activityService: {
+        getBrokerSyncProfile: () => {
+          throw new Error("not used");
+        },
+        saveBrokerSyncProfileRules: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+    const deviceSyncService = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: fetchImpl,
+      restoreSyncSession: () => connectService.restoreSyncSession(),
+    });
+
+    try {
+      await expect(
+        Promise.all([connectService.restoreSyncSession(), deviceSyncService.getDeviceSyncState()]),
+      ).resolves.toHaveLength(2);
+      expect(tokenRequests).toBe(1);
+      expect(maxActiveTokenRestores).toBe(1);
+      expect(secretService.entries.get("sync_refresh_token")).toBe("rotated-refresh-token");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("serializes clearing local sync data with enable key initialization", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            device_id: "device-1",
+            e2ee_key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "BOOTSTRAP",
+            challenge: "challenge-1",
+            nonce: "nonce-1",
+            key_version: 2,
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize/commit")) {
+          return Response.json({ success: true, key_state: "ACTIVE" });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(
+        Promise.all([service.enableDeviceSync(), service.clearDeviceSyncData()]),
+      ).resolves.toHaveLength(2);
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(typeof identity.deviceNonce).toBe("string");
+      expect(secretService.entries.get("sync_device_id")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("enables FRESH device sync as registered when pairing is required", async () => {
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          mode: "PAIR",
+          device_id: "device-1",
+          e2ee_key_version: 4,
+          require_sas: true,
+          pairing_ttl_seconds: 300,
+          trusted_devices: [
+            { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+          ],
+        });
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toEqual({
+        deviceId: "device-1",
+        state: "REGISTERED",
+        keyVersion: null,
+        serverKeyVersion: 4,
+        needsPairing: true,
+        trustedDevices: [{ id: "device-2", name: "iPhone", platform: "ios", lastSeenAt: null }],
+      });
+      expect(requests.some((url) => url.includes("/sync/team/keys/initialize"))).toBe(false);
+      const identity = JSON.parse(secretService.entries.get("sync_identity") ?? "{}") as Record<
+        string,
+        unknown
+      >;
+      expect(identity).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'old-device'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reinitializes only after cloud reset succeeds and preserves the device nonce", async () => {
+    const failingDb = createDeviceSyncStateDb();
+    const failingSecretService = createMemorySecretService();
+    const originalIdentity = {
+      version: 2,
+      deviceNonce: "existing-nonce",
+      deviceId: "old-device",
+      rootKey: "root",
+      keyVersion: 1,
+      deviceSecretKey: "secret",
+      devicePublicKey: "public",
+    };
+    failingSecretService.entries.set("sync_refresh_token", "refresh-token");
+    failingSecretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+    const failingService = createLocalConnectDeviceSyncService({
+      db: failingDb,
+      secretService: failingSecretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({ success: false, key_version: 1, reset_at: null });
+      },
+    });
+
+    try {
+      await expect(failingService.reinitializeDeviceSync()).rejects.toMatchObject({
+        code: "internal_error",
+        message:
+          "Team sync reset was not accepted. Please verify account permissions and try again.",
+      });
+      expect(JSON.parse(failingSecretService.entries.get("sync_identity") ?? "{}")).toEqual(
+        originalIdentity,
+      );
+    } finally {
+      failingDb.close();
+    }
+
+    async function expectRejectedMalformedReset(resetResponse: string): Promise<void> {
+      const malformedDb = createDeviceSyncStateDb();
+      const malformedSecretService = createMemorySecretService();
+      malformedSecretService.entries.set("sync_refresh_token", "refresh-token");
+      malformedSecretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+      const malformedService = createLocalConnectDeviceSyncService({
+        db: malformedDb,
+        secretService: malformedSecretService,
+        env: { CONNECT_API_URL: "https://api.example.test" },
+        reinitializeDelayMs: 0,
+        fetch: async (input) => {
+          if (String(input).includes("/auth/v1/token")) {
+            return Response.json({ access_token: "access-token" });
+          }
+          return new Response(resetResponse, { headers: { "content-type": "application/json" } });
+        },
+      });
+
+      try {
+        await expect(malformedService.reinitializeDeviceSync()).rejects.toMatchObject({
+          code: "internal_error",
+          message: "Failed to parse reset team sync response",
+          status: 500,
+        });
+        expect(JSON.parse(malformedSecretService.entries.get("sync_identity") ?? "{}")).toEqual(
+          originalIdentity,
+        );
+      } finally {
+        malformedDb.close();
+      }
+    }
+
+    await expectRejectedMalformedReset('{"success":true,"key_version":1.0,"reset_at":null}');
+    await expectRejectedMalformedReset(
+      '{"success":true,"key_version":1,"keyVersion":1,"reset_at":null}',
+    );
+    await expectRejectedMalformedReset('{"success":true,"key_version":1,"reset_at":123}');
+
+    const db = createDeviceSyncStateDb();
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set("sync_identity", JSON.stringify(originalIdentity));
+    const requests: Array<{ url: string; body: Record<string, unknown> | null }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      reinitializeDelayMs: 0,
+      fetch: async (input, init) => {
+        const url = String(input);
+        const body =
+          typeof init?.body === "string"
+            ? (JSON.parse(init.body) as Record<string, unknown>)
+            : null;
+        requests.push({ url, body });
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/reset")) {
+          return Response.json({ success: true, key_version: 1, reset_at: "2026-01-01T00:00:00Z" });
+        }
+        return Response.json({
+          mode: "PAIR",
+          device_id: "new-device",
+          e2ee_key_version: 4,
+          require_sas: true,
+          pairing_ttl_seconds: 300,
+          trusted_devices: [
+            { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+          ],
+        });
+      },
+    });
+
+    try {
+      await expect(service.reinitializeDeviceSync()).resolves.toMatchObject({
+        deviceId: "new-device",
+        state: "REGISTERED",
+        needsPairing: true,
+      });
+      expect(
+        requests.find((request) => request.url.endsWith("/api/v1/sync/team/keys/reset"))?.body,
+      ).toEqual({ reason: "reinitialize" });
+      expect(
+        requests.find((request) => request.url.endsWith("/api/v1/sync/team/devices"))?.body,
+      ).toMatchObject({ device_nonce: "existing-nonce" });
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        deviceNonce: "existing-nonce",
+        deviceId: "new-device",
+        rootKey: null,
+        keyVersion: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("re-enrolls device sync from RECOVERY state", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices") && init?.method === "POST") {
+          return Response.json({
+            mode: "PAIR",
+            device_id: "device-2",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "trusted-1", name: "iPhone", platform: "ios", last_seen_at: null },
+            ],
+          });
+        }
+        return Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 });
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toMatchObject({
+        deviceId: "device-2",
+        state: "REGISTERED",
+        needsPairing: true,
+      });
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        deviceNonce: "nonce-1",
+        deviceId: "device-2",
+        rootKey: null,
+        keyVersion: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reconciles ready state locally for auth and non-ready preconditions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: No sync session configured",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "not_attempted",
+        backgroundStatus: "skipped",
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "skipped_not_ready",
+        message: "Device is not in READY state",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "not_attempted",
+        backgroundStatus: "skipped",
+      });
+
+      secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: Failed to parse identity",
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: Failed to parse device response",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps ready reconcile overwrite identity lookup best-effort", async () => {
+    const db = new Database(":memory:");
+    const secretService: SecretService = {
+      setSecret() {},
+      getSecret() {
+        throw new Error("keychain down");
+      },
+      deleteSecret() {},
+    };
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async () => Response.json({ access_token: "access-token" }),
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: true }),
+      ).resolves.toMatchObject({
+        status: "error",
+        message: "Failed to read sync state: keychain down",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reconciles READY local state when bootstrap is already complete", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: false }),
+      ).resolves.toEqual({
+        status: "ok",
+        message: "Device sync reconcile completed",
+        bootstrapAction: "NO_BOOTSTRAP",
+        bootstrapStatus: "skipped",
+        bootstrapMessage: "Snapshot bootstrap already completed",
+        bootstrapSnapshotId: null,
+        cycleStatus: null,
+        cycleNeedsBootstrap: false,
+        retryAttempted: false,
+        retryCycleStatus: null,
+        backgroundStatus: "skipped",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reads READY, REGISTERED, and RECOVERY sync states from cloud device status", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const deviceResponses: Response[] = [
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "trusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "trusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "untrusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "untrusted",
+        trusted_key_version: 2,
+      }),
+      Response.json({
+        id: "device-1",
+        display_name: "MacBook",
+        platform: "mac",
+        trust_state: "untrusted",
+      }),
+      Response.json({ code: "DEVICE_NOT_FOUND", message: "not found" }, { status: 404 }),
+    ];
+    const listResponses: Response[] = [
+      Response.json([
+        {
+          id: "trusted-device",
+          display_name: "iPhone",
+          platform: "ios",
+          trust_state: "trusted",
+          last_seen_at: "2026-01-01T00:00:00Z",
+        },
+      ]),
+      Response.json([]),
+      Response.json([]),
+    ];
+    const requests: string[] = [];
+    const syncHeaders: Array<{
+      url: string;
+      clientRequestId: string | null;
+      deviceId: string | null;
+    }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        const headers = new Headers(init?.headers);
+        if (url.includes("/api/v1/sync/")) {
+          syncHeaders.push({
+            url,
+            clientRequestId: headers.get("x-wf-client-request-id"),
+            deviceId: headers.get("x-wf-device-id"),
+          });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices?scope=my")) {
+          return listResponses.shift() ?? Response.json([]);
+        }
+        if (url.endsWith("/api/v1/sync/team/keys/initialize")) {
+          return Response.json({
+            mode: "PAIRING_REQUIRED",
+            e2ee_key_version: 3,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [],
+          });
+        }
+        return deviceResponses.shift() ?? Response.json({}, { status: 500 });
+      },
+    });
+
+    try {
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "READY",
+        deviceId: "device-1",
+        deviceName: "MacBook",
+        keyVersion: 2,
+        serverKeyVersion: 2,
+        isTrusted: true,
+        trustedDevices: [],
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          keyVersion: 2,
+        }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: true,
+        trustedDevices: [],
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "REGISTERED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: false,
+        trustedDevices: [
+          {
+            id: "trusted-device",
+            name: "iPhone",
+            platform: "ios",
+            lastSeenAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "ORPHANED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: 2,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "ORPHANED",
+        deviceId: "device-1",
+        keyVersion: null,
+        serverKeyVersion: null,
+        isTrusted: false,
+        trustedDevices: [],
+      });
+
+      await expect(service.getDeviceSyncState()).resolves.toMatchObject({
+        state: "RECOVERY",
+        deviceId: "device-1",
+        deviceName: null,
+        isTrusted: false,
+      });
+      expect(
+        requests.filter((request) => request.includes("/api/v1/sync/team/devices/device-1")),
+      ).toHaveLength(6);
+      expect(
+        requests.filter((request) => request.endsWith("/api/v1/sync/team/devices?scope=my")),
+      ).toHaveLength(3);
+      expect(
+        requests.filter((request) => request.endsWith("/api/v1/sync/team/keys/initialize")),
+      ).toHaveLength(1);
+      expect(
+        syncHeaders
+          .filter((headers) => headers.url.includes("/api/v1/sync/team/devices"))
+          .every(
+            (headers) => headers.clientRequestId?.startsWith("app:") && headers.deviceId === null,
+          ),
+      ).toBe(true);
+      expect(
+        syncHeaders
+          .filter((headers) => headers.url.endsWith("/api/v1/sync/team/keys/initialize"))
+          .every(
+            (headers) =>
+              headers.clientRequestId?.startsWith("device-1:") && headers.deviceId === "device-1",
+          ),
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reads local sync engine status and bootstrap requirement", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 7,
+      }),
+    );
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_push_at, last_pull_at, last_error, consecutive_failures,
+        next_retry_at, last_cycle_status, last_cycle_duration_ms
+      ) VALUES (
+        1, 5, '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z', 'last-error', 2,
+        '2026-01-04T00:00:00Z', 'ok', 123
+      );
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 7, 'trusted', '2026-01-01T00:00:00Z');
+    `);
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.getDeviceSyncEngineStatus()).resolves.toEqual({
+        cursor: 42,
+        lastPushAt: "2026-01-02T00:00:00Z",
+        lastPullAt: "2026-01-03T00:00:00Z",
+        lastError: "last-error",
+        consecutiveFailures: 2,
+        nextRetryAt: "2026-01-04T00:00:00Z",
+        lastCycleStatus: "ok",
+        lastCycleDurationMs: 123,
+        backgroundRunning: false,
+        bootstrapRequired: false,
+      });
+
+      db.prepare(
+        "UPDATE sync_engine_state SET last_cycle_status = 'stale_cursor' WHERE id = 1",
+      ).run();
+      await expect(service.getDeviceSyncEngineStatus()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
+        bootstrapRequired: true,
+        hasLocalData: false,
+        localRows: 0,
+        nonEmptyTables: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("summarizes local overwrite risk rows for bootstrap checks", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE assets (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL);
+      CREATE TABLE quotes (id TEXT PRIMARY KEY NOT NULL, source TEXT NOT NULL);
+      CREATE TABLE import_templates (id TEXT PRIMARY KEY NOT NULL, scope TEXT NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      INSERT INTO accounts (id) VALUES ('account-1');
+      INSERT INTO assets (id, kind) VALUES ('asset-1', 'PROPERTY'), ('asset-2', 'EQUITY');
+      INSERT INTO quotes (id, source) VALUES ('quote-1', 'MANUAL'), ('quote-2', 'YAHOO');
+      INSERT INTO import_templates (id, scope) VALUES ('template-1', 'USER'), ('template-2', 'SYSTEM');
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
+        bootstrapRequired: true,
+        hasLocalData: true,
+        localRows: 4,
+        nonEmptyTables: [
+          { table: "accounts", rows: 1 },
+          { table: "assets", rows: 1 },
+          { table: "import_templates", rows: 1 },
+          { table: "quotes", rows: 1 },
+        ],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("preserves ready reconcile overwrite approval while waiting for snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'trusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        if (url.includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+        hasLocalData: true,
+        localRows: 1,
+      });
+      await expect(
+        service.reconcileDeviceSyncReadyState({ allowOverwrite: true }),
+      ).resolves.toMatchObject({
+        status: "ok",
+        bootstrapStatus: "requested",
+        bootstrapAction: "WAIT_REMOTE_SNAPSHOT",
+      });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toEqual({
+        bootstrapRequired: true,
+        hasLocalData: false,
+        localRows: 0,
+        nonEmptyTables: [],
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns local background and snapshot cancellation no-op responses", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started because sync identity is not configured",
+      });
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+      expect(service.cancelDeviceSnapshotUpload()).toEqual({
+        status: "cancel_requested",
+        message: "Snapshot upload cancellation requested",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips background engine start when identity can run but session is unavailable", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started: No sync session configured",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("starts and stops background engine when sync state is READY", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "started",
+        message: "Device sync background engine started",
+      });
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("background engine prunes old sent and dead outbox rows", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, created_at
+      )
+      VALUES
+        ('sent-old', 'account', 'a1', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2020-01-01T00:00:00.000Z'),
+        ('sent-new', 'account', 'a2', 'update', '2999-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2999-01-01T00:00:00.000Z'),
+        ('dead-old', 'account', 'a3', 'update', '2020-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2020-01-01T00:00:00.000Z'),
+        ('dead-new', 'account', 'a4', 'update', '2999-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2999-01-01T00:00:00.000Z'),
+        ('pending-old', 'account', 'a5', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'pending', 0, '2020-01-01T00:00:00.000Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let failReconcile = false;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      backgroundOutboxPruneIntervalMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (failReconcile) {
+            return new Response("temporary reconcile failure", { status: 500 });
+          }
+          return Response.json({ action: "NOOP", cursor: 0 });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await service.startDeviceSyncBackgroundEngine();
+      const deadline = Date.now() + 1_000;
+      let firstPruneDone = false;
+      while (Date.now() < deadline) {
+        const remaining = db
+          .query<{ event_id: string }, []>("SELECT event_id FROM sync_outbox ORDER BY event_id")
+          .all()
+          .map((row) => row.event_id);
+        if (!remaining.includes("sent-old") && !remaining.includes("dead-old")) {
+          expect(remaining).toEqual(["dead-new", "pending-old", "sent-new"]);
+          firstPruneDone = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      if (!firstPruneDone) {
+        throw new Error("Timed out waiting for background outbox pruning");
+      }
+      await service.stopDeviceSyncBackgroundEngine();
+      db.exec(`
+        INSERT INTO sync_outbox (
+          event_id, entity, entity_id, op, client_timestamp, payload,
+          payload_key_version, sent, status, retry_count, created_at
+        )
+        VALUES
+          ('sent-old-after-error', 'account', 'a6', 'update', '2020-01-01T00:00:00Z', '{}', 1, 1, 'sent', 0, '2020-01-01T00:00:00.000Z'),
+          ('dead-old-after-error', 'account', 'a7', 'update', '2020-01-01T00:00:00Z', '{}', 1, 0, 'dead', 0, '2020-01-01T00:00:00.000Z');
+      `);
+      failReconcile = true;
+      await service.startDeviceSyncBackgroundEngine();
+      const secondDeadline = Date.now() + 1_000;
+      while (Date.now() < secondDeadline) {
+        const remaining = db
+          .query<{ event_id: string }, []>("SELECT event_id FROM sync_outbox ORDER BY event_id")
+          .all()
+          .map((row) => row.event_id);
+        if (
+          !remaining.includes("sent-old-after-error") &&
+          !remaining.includes("dead-old-after-error")
+        ) {
+          expect(remaining).toEqual(["dead-new", "pending-old", "sent-new"]);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("Timed out waiting for background outbox pruning after failed cycle");
+    } finally {
+      await service.stopDeviceSyncBackgroundEngine();
+      db.close();
+    }
+  });
+
+  test("does not start background engine after stop races an in-flight start", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let resolveDevice: ((response: Response) => void) | undefined;
+    const deviceResponse = new Promise<Response>((resolve) => {
+      resolveDevice = resolve;
+    });
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return await deviceResponse;
+      },
+    });
+
+    try {
+      const startPromise = service.startDeviceSyncBackgroundEngine();
+      await expect(service.stopDeviceSyncBackgroundEngine()).resolves.toEqual({
+        status: "stopped",
+        message: "Device sync background engine stopped",
+      });
+      resolveDevice?.(
+        Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        }),
+      );
+      await expect(startPromise).resolves.toEqual({
+        status: "skipped",
+        message: "Background engine not started because start was cancelled",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("background engine consecutive not-ready counter resets on stop and restart", async () => {
+    // Verify that after stopping the engine, the consecutive_not_ready counter
+    // is reset so the engine resumes at base delay on next start.
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 0, '2026-01-01T00:00:00Z');
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 0);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let cycleCount = 0;
+    let readyChecksRemaining = 0;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices") && !url.includes("/trusted-devices")) {
+          if (readyChecksRemaining > 0) {
+            readyChecksRemaining -= 1;
+            return Response.json({
+              id: "device-1",
+              display_name: "MacBook",
+              trust_state: "trusted",
+              trusted_key_version: 1,
+            });
+          }
+          cycleCount += 1;
+          return Response.json({
+            id: "device-1",
+            display_name: "MacBook",
+            trust_state: "untrusted",
+            trusted_key_version: null,
+          });
+        }
+        if (url.includes("/trusted-devices")) {
+          return Response.json([]);
+        }
+        return Response.json({});
+      },
+    });
+
+    try {
+      // Phase 1: run several not_ready cycles then stop.
+      readyChecksRemaining = 1;
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toMatchObject({
+        status: "started",
+      });
+      const deadline1 = Date.now() + 500;
+      while (Date.now() < deadline1 && cycleCount < 3) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await service.stopDeviceSyncBackgroundEngine();
+      const countAfterStop = cycleCount;
+      expect(countAfterStop).toBeGreaterThanOrEqual(1);
+
+      // Phase 2: restart. Counter must be reset so the engine starts again
+      // immediately (scheduleBackgroundCycle(0)) and runs its first cycle
+      // within the test window.
+      const cyclesBeforeRestart = cycleCount;
+      readyChecksRemaining = 1;
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toMatchObject({
+        status: "started",
+      });
+      const deadline2 = Date.now() + 500;
+      while (Date.now() < deadline2 && cycleCount === cyclesBeforeRestart) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(cycleCount).toBeGreaterThan(cyclesBeforeRestart);
+    } finally {
+      await service.stopDeviceSyncBackgroundEngine();
+      db.close();
+    }
+  });
+
+  test("clears local device sync session data while preserving app data and device nonce", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 3,
+        deviceSecretKey: "secret-key",
+        devicePublicKey: "public-key",
+      }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    db.exec(`
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_entity_metadata (
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        last_event_id TEXT NOT NULL,
+        last_client_timestamp TEXT NOT NULL,
+        last_op TEXT NOT NULL DEFAULT 'update',
+        last_seq BIGINT NOT NULL DEFAULT 0,
+        PRIMARY KEY (entity, entity_id)
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_table_state (table_name TEXT PRIMARY KEY NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE sync_applied_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        seq BIGINT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      INSERT INTO accounts (id) VALUES ('account-keep');
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload, payload_key_version,
+        sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-1', 'account', 'account-1', 'update', '2026-01-01T00:00:00Z', '{}', 3,
+        0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+      INSERT INTO sync_entity_metadata (
+        entity, entity_id, last_event_id, last_client_timestamp, last_op, last_seq
+      ) VALUES ('account', 'account-1', 'event-1', '2026-01-01T00:00:00Z', 'update', 9);
+      INSERT INTO sync_applied_events (
+        event_id, seq, entity, entity_id, applied_at
+      ) VALUES ('event-applied', 10, 'account', 'account-1', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 3, 'trusted', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_push_at, last_pull_at, last_error, consecutive_failures,
+        next_retry_at, last_cycle_status, last_cycle_duration_ms
+      ) VALUES (
+        1, 7, '2026-01-02T00:00:00Z', '2026-01-03T00:00:00Z', 'stale', 2,
+        '2026-01-04T00:00:00Z', 'failed', 50
+      );
+      INSERT INTO sync_table_state (table_name, enabled) VALUES ('accounts', 1);
+    `);
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await service.clearDeviceSyncData();
+
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toEqual({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: null,
+        rootKey: null,
+        keyVersion: null,
+        deviceSecretKey: null,
+        devicePublicKey: null,
+      });
+      expect(secretService.entries.has("sync_device_id")).toBe(false);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM accounts").get(),
+      ).toEqual({
+        count: 1,
+      });
+      for (const tableName of [
+        "sync_outbox",
+        "sync_entity_metadata",
+        "sync_applied_events",
+        "sync_table_state",
+        "sync_device_config",
+      ]) {
+        expect(
+          db.query<{ count: number }, []>(`SELECT COUNT(*) AS count FROM "${tableName}"`).get(),
+        ).toEqual({ count: 0 });
+      }
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toEqual({ cursor: 0 });
+      expect(
+        db
+          .query<
+            { lock_version: number; last_error: string | null; last_cycle_status: string | null },
+            []
+          >("SELECT lock_version, last_error, last_cycle_status FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({ lock_version: 0, last_error: null, last_cycle_status: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects malformed sync identity during local device sync clear", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_identity", JSON.stringify({ deviceNonce: 42 }));
+    secretService.entries.set("sync_device_id", "device-1");
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.clearDeviceSyncData()).rejects.toThrow("Failed to parse identity");
+      expect(secretService.entries.get("sync_identity")).toBe(JSON.stringify({ deviceNonce: 42 }));
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records config error for local trigger cycle without sync identity", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 7, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 3);
+    `);
+    const service = createLocalConnectDeviceSyncService({ db });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "config_error",
+        lockVersion: 3,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 7,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({
+        last_cycle_status: "config_error",
+        last_error: "No sync identity configured. Please enable sync first.",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses sync identity for local trigger cycle preconditions", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), cursor BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL);
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 9, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 4);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('legacy-device', 1, 'trusted', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 1, 'trusted', '2026-01-01T00:00:00Z');
+    `);
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "config_error",
+        lockVersion: 4,
+        cursor: 9,
+      });
+
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+        lockVersion: 4,
+        cursor: 9,
+      });
+      expect(
+        db
+          .query<
+            { last_cycle_status: string | null; last_error: string | null },
+            []
+          >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+          .get(),
+      ).toEqual({
+        last_cycle_status: "state_error",
+        last_error: "Failed to read sync state: No sync session configured",
+      });
+
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: null, trust_state: "untrusted", last_bootstrap_at: null });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "not_ready",
+        lockVersion: 4,
+        cursor: 9,
+      });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: null, trust_state: "untrusted", last_bootstrap_at: null });
+      await expect(service.getDeviceSyncBootstrapOverwriteCheck()).resolves.toMatchObject({
+        bootstrapRequired: true,
+      });
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-1",
+          deviceId: "device-1",
+          rootKey: "root-key",
+          keyVersion: 1,
+        }),
+      );
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns ok for READY trigger cycle when reconcile is NOOP and outbox is empty", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 9, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures
+      ) VALUES (1, 4, 'stale_cursor', 'stale', 3);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const requests: string[] = [];
+    let reconcileMode:
+      | "noop"
+      | "duplicate-action"
+      | "invalid-json"
+      | "invalid-key-escape"
+      | "non-object" = "noop";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (reconcileMode === "duplicate-action") {
+            return new Response('{"action":"WAIT_SNAPSHOT","action":"NOOP"}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (reconcileMode === "invalid-json") {
+            return new Response("not-json", { headers: { "content-type": "application/json" } });
+          }
+          if (reconcileMode === "invalid-key-escape") {
+            return new Response('{"\\uZZZZ":"NOOP"}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (reconcileMode === "non-object") {
+            return Response.json([]);
+          }
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "ok",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 9,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              last_cycle_status: string | null;
+              last_error: string | null;
+              consecutive_failures: number;
+            },
+            []
+          >(
+            "SELECT last_cycle_status, last_error, consecutive_failures FROM sync_engine_state WHERE id = 1",
+          )
+          .get(),
+      ).toEqual({ last_cycle_status: "ok", last_error: null, consecutive_failures: 0 });
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ key_version: 1, trust_state: "trusted", last_bootstrap_at: null });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.wealthfolio.app/api/v1/sync/team/devices/device-1",
+        "https://api.wealthfolio.app/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      reconcileMode = "duplicate-action";
+      requests.length = 0;
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "invalid-json";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "invalid-key-escape";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "non-object";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+      reconcileMode = "noop";
+
+      db.query(
+        `
+          INSERT INTO sync_outbox (
+            event_id, entity, entity_id, op, client_timestamp, payload,
+            payload_key_version, sent, status, retry_count, device_id, created_at
+          )
+          VALUES (
+            'event-1', 'account', 'account-1', 'update', '2026-01-01T00:00:00Z',
+            '{}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+          )
+        `,
+      ).run();
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 5,
+        pushedCount: 0,
+        deadLetterCount: 1,
+      });
+      expect(
+        db
+          .query<
+            { status: string; last_error: string | null; last_error_code: string | null },
+            []
+          >("SELECT status, last_error, last_error_code FROM sync_outbox WHERE event_id = 'event-1'")
+          .get(),
+      ).toEqual({
+        status: "dead",
+        last_error: "Remote sync requires UUID entity_id",
+        last_error_code: "invalid_entity_id",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns wait_snapshot for READY trigger cycle when reconcile asks to wait", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 11, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures
+      ) VALUES (1, 4, 'state_error', 'stale error', 3);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      const before = Date.now();
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "wait_snapshot",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 11,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      const after = Date.now();
+      const row = db
+        .query<
+          {
+            last_cycle_status: string | null;
+            last_error: string | null;
+            consecutive_failures: number;
+            next_retry_at: string | null;
+          },
+          []
+        >(
+          "SELECT last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+        )
+        .get();
+      expect(row).toMatchObject({
+        last_cycle_status: "wait_snapshot",
+        last_error: "stale error",
+        consecutive_failures: 3,
+      });
+      const retryAt = Date.parse(row?.next_retry_at ?? "");
+      expect(retryAt).toBeGreaterThanOrEqual(before + 29_000);
+      expect(retryAt).toBeLessThanOrEqual(after + 31_000);
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.wealthfolio.app/api/v1/sync/team/devices/device-1",
+        "https://api.wealthfolio.app/api/v1/sync/events/reconcile-ready-state",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns stale_cursor for READY trigger cycle when reconcile requires bootstrap", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 12, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures, next_retry_at
+      ) VALUES (1, 4, 'state_error', 'stale error', 3, '2030-01-01T00:00:00Z');
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let latestSnapshotMode:
+      | "valid"
+      | "missing-schema"
+      | "float-seq"
+      | "duplicate-float-seq"
+      | "unsafe-seq" = "valid";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (latestSnapshotMode === "missing-schema") {
+            return Response.json({
+              action: "BOOTSTRAP_SNAPSHOT",
+              latest_snapshot: {
+                snapshot_id: "snapshot-1",
+                oplog_seq: 99,
+              },
+            });
+          }
+          if (latestSnapshotMode === "float-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":99.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (latestSnapshotMode === "duplicate-float-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":99,"oplog_seq":99.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (latestSnapshotMode === "unsafe-seq") {
+            return new Response(
+              '{"action":"BOOTSTRAP_SNAPSHOT","latest_snapshot":{"snapshot_id":"snapshot-1","schema_version":1,"oplog_seq":9007199254740993}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return Response.json({
+            action: "BOOTSTRAP_SNAPSHOT",
+            latest_snapshot: {
+              snapshot_id: "snapshot-1",
+              schema_version: 1,
+              oplog_seq: 99,
+            },
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "stale_cursor",
+        lockVersion: 0,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 12,
+        needsBootstrap: true,
+        bootstrapSnapshotId: "snapshot-1",
+        bootstrapSnapshotSeq: 99,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              last_cycle_status: string | null;
+              last_error: string | null;
+              consecutive_failures: number;
+              next_retry_at: string | null;
+            },
+            []
+          >(
+            "SELECT last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+          )
+          .get(),
+      ).toEqual({
+        last_cycle_status: "stale_cursor",
+        last_error: "stale error",
+        consecutive_failures: 3,
+        next_retry_at: null,
+      });
+
+      latestSnapshotMode = "missing-schema";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      latestSnapshotMode = "float-seq";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      latestSnapshotMode = "duplicate-float-seq";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      latestSnapshotMode = "unsafe-seq";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("pushes encrypted outbox events to cloud and marks them sent", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const rootKey = Buffer.from(new Uint8Array(32).fill(11)).toString("base64");
+    const crypto = createSyncCryptoService({
+      randomBytes: (size) => new Uint8Array(size).fill(5),
+    });
+    const dek = (await crypto.deriveDek(rootKey, 1)).value;
+    const pushPayload = JSON.stringify({ id: "acct-uuid", name: "My Account" });
+    const encryptedPayload = (await crypto.encrypt(dek, pushPayload)).value;
+    const accountId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-uuid-1', 'account', '${accountId}', 'create', '2026-01-01T00:00:00Z',
+        '${pushPayload}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    const pushRequests: Array<{ url: string; body: unknown }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 1,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as unknown;
+          pushRequests.push({ url, body });
+          return Response.json({
+            accepted: [{ event_id: "event-uuid-1" }],
+            duplicate: [],
+            server_cursor: 6,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          return Response.json({ from: 5, to: 6, next_cursor: 6, has_more: false, events: [] });
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        pushedCount: 1,
+        pulledCount: 0,
+        cursor: 6,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { sent: number; status: string },
+            []
+          >("SELECT sent, status FROM sync_outbox WHERE event_id = 'event-uuid-1'")
+          .get(),
+      ).toEqual({ sent: 1, status: "sent" });
+      expect(pushRequests).toHaveLength(1);
+      expect(pushRequests[0]!.url).toContain("/api/v1/sync/events/push");
+      const pushBody = pushRequests[0]!.body as { events: Array<Record<string, unknown>> };
+      expect(pushBody.events).toHaveLength(1);
+      expect(pushBody.events[0]!.event_id).toBe("event-uuid-1");
+      expect(pushBody.events[0]!.entity).toBe("account");
+      expect(pushBody.events[0]!.entity_id).toBe(accountId);
+      expect(pushBody.events[0]!.payload_key_version).toBe(1);
+      const pushedPayload = pushBody.events[0]!.payload as string;
+      const decrypted = (await crypto.decrypt(dek, pushedPayload)).value;
+      expect(JSON.parse(decrypted)).toEqual({ id: "acct-uuid", name: "My Account" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("schedules retry for retryable and auth push failures", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const accountId = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    const rootKey = Buffer.from(new Uint8Array(32).fill(13)).toString("base64");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-uuid-2', 'account', '${accountId}', 'update', '2026-01-01T00:00:00Z',
+        '{"change":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    let pushResponseStatus = 500;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 1,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          return Response.json(
+            { code: "PUSH_FAILED", message: "server error" },
+            { status: pushResponseStatus },
+          );
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      // 500 retryable — outbox should get a retry_count increment and next_retry_at
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      const afterRetryable = db
+        .query<
+          { retry_count: number; next_retry_at: string | null; status: string },
+          []
+        >("SELECT retry_count, next_retry_at, status FROM sync_outbox WHERE event_id = 'event-uuid-2'")
+        .get();
+      expect(afterRetryable?.status).toBe("pending");
+      expect(afterRetryable?.retry_count).toBe(1);
+      expect(afterRetryable?.next_retry_at).not.toBeNull();
+
+      // Reset retry state so the event is re-eligible
+      db.prepare(
+        "UPDATE sync_outbox SET retry_count = 0, next_retry_at = NULL WHERE event_id = 'event-uuid-2'",
+      ).run();
+
+      // 401 auth failure — should schedule reauth retry (status stays pending)
+      pushResponseStatus = 401;
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      const afterAuth = db
+        .query<
+          { retry_count: number; next_retry_at: string | null; status: string },
+          []
+        >("SELECT retry_count, next_retry_at, status FROM sync_outbox WHERE event_id = 'event-uuid-2'")
+        .get();
+      expect(afterAuth?.status).toBe("pending");
+      expect(afterAuth?.retry_count).toBe(1);
+      expect(afterAuth?.next_retry_at).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("dead-letters outbox events on permanent push errors and KEY_VERSION_MISMATCH", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const accountId = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    const staleAccountId = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    const rootKey = Buffer.from(new Uint8Array(32).fill(17)).toString("base64");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-perm-1', 'account', '${accountId}', 'create', '2026-01-01T00:00:00Z',
+        '{"perm":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 2,
+      }),
+    );
+    let pushResponseStatus = 400;
+    let pushResponseBody = JSON.stringify({ code: "INVALID_PAYLOAD" });
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          return new Response(pushResponseBody, {
+            status: pushResponseStatus,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      // 400 permanent error — outbox event should be dead-lettered
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { status: string; last_error_code: string | null },
+            []
+          >("SELECT status, last_error_code FROM sync_outbox WHERE event_id = 'event-perm-1'")
+          .get(),
+      ).toMatchObject({ status: "dead", last_error_code: "permanent" });
+
+      // Insert new stale-key-version event alongside a current-key-version event.
+      // KEY_VERSION_MISMATCH with only stale events → stale dead-lettered, cycle ok.
+      db.prepare(
+        `INSERT INTO sync_outbox (
+          event_id, entity, entity_id, op, client_timestamp, payload,
+          payload_key_version, sent, status, retry_count, device_id, created_at
+        ) VALUES (
+          'event-stale-1', 'account', '${staleAccountId}', 'create', '2026-01-01T00:00:00Z',
+          '{"stale":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+        )`,
+      ).run();
+      pushResponseStatus = 400;
+      pushResponseBody = JSON.stringify({ code: "KEY_VERSION_MISMATCH", message: "mismatch" });
+      const result = await service.triggerDeviceSyncCycle();
+      expect(result).toMatchObject({ status: "ok", pushedCount: 0 });
+      expect(
+        db
+          .query<
+            { status: string; last_error_code: string | null },
+            []
+          >("SELECT status, last_error_code FROM sync_outbox WHERE event_id = 'event-stale-1'")
+          .get(),
+      ).toMatchObject({ status: "dead", last_error_code: "key_version_mismatch" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("returns ok for READY pull-tail trigger cycle when cursors already match", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 12, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (
+        id, lock_version, last_cycle_status, last_error, consecutive_failures, next_retry_at
+      ) VALUES (1, 4, 'state_error', 'stale error', 3, '2030-01-01T00:00:00Z');
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 1,
+      }),
+    );
+    let serverCursor:
+      | number
+      | string
+      | "float-token"
+      | "duplicate-float-token"
+      | "duplicate-action"
+      | null = null;
+    let pullMode: "empty" | "gc-watermark" | "unsafe-next" | "stuck" = "empty";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (serverCursor === "float-token") {
+            return new Response('{"action":"PULL_TAIL","cursor":12.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (serverCursor === "duplicate-float-token") {
+            return new Response('{"action":"PULL_TAIL","cursor":12,"cursor":12.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (serverCursor === "duplicate-action") {
+            return new Response('{"action":"NOOP","action":"PULL_TAIL"}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return serverCursor === null
+            ? Response.json({ action: "PULL_TAIL" })
+            : Response.json({ action: "PULL_TAIL", cursor: serverCursor });
+        }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          if (pullMode === "gc-watermark") {
+            return Response.json({
+              from: 12,
+              to: 13,
+              next_cursor: 13,
+              has_more: false,
+              events: [],
+              gc_watermark: 20,
+            });
+          }
+          if (pullMode === "unsafe-next") {
+            return new Response(
+              '{"from":12,"to":13,"next_cursor":9007199254740993,"has_more":false,"events":[]}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (pullMode === "stuck") {
+            return Response.json({
+              from: 12,
+              to: 12,
+              next_cursor: 12,
+              has_more: true,
+              events: [],
+            });
+          }
+          return Response.json({ from: 12, to: 13, next_cursor: 13, has_more: false, events: [] });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toEqual({
+        status: "ok",
+        lockVersion: 5,
+        pushedCount: 0,
+        pulledCount: 0,
+        cursor: 12,
+        needsBootstrap: false,
+        bootstrapSnapshotId: null,
+        bootstrapSnapshotSeq: null,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              lock_version: number;
+              last_cycle_status: string | null;
+              last_error: string | null;
+              consecutive_failures: number;
+              next_retry_at: string | null;
+            },
+            []
+          >(
+            "SELECT lock_version, last_cycle_status, last_error, consecutive_failures, next_retry_at FROM sync_engine_state WHERE id = 1",
+          )
+          .get(),
+      ).toEqual({
+        lock_version: 5,
+        last_cycle_status: "ok",
+        last_error: null,
+        consecutive_failures: 0,
+        next_retry_at: null,
+      });
+
+      serverCursor = 13;
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 6,
+        pulledCount: 0,
+        cursor: 13,
+      });
+      expect(
+        db.query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get(),
+      ).toEqual({ cursor: 13 });
+
+      db.prepare("UPDATE sync_cursor SET cursor = 12 WHERE id = 1").run();
+      pullMode = "gc-watermark";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "stale_cursor",
+        lockVersion: 7,
+        cursor: 12,
+        needsBootstrap: true,
+      });
+
+      pullMode = "unsafe-next";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "pull_error",
+        lockVersion: 8,
+        cursor: 12,
+      });
+      pullMode = "empty";
+
+      pullMode = "stuck";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "pull_error",
+        lockVersion: 9,
+        cursor: 12,
+      });
+      pullMode = "empty";
+
+      serverCursor = "bad";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      serverCursor = "float-token";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      serverCursor = "duplicate-float-token";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+
+      serverCursor = "duplicate-action";
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "state_error",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("publishes pull-complete events after applying pulled replay events", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const eventBus = createEventBus();
+    const events: string[] = [];
+    eventBus.subscribe((event) => events.push(event.name));
+    const rootKey = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+    const crypto = createSyncCryptoService({
+      randomBytes: (size) => new Uint8Array(size).fill(3),
+    });
+    const accountId = "11111111-1111-4111-8111-111111111111";
+    const replayPayload = {
+      id: accountId,
+      name: "Synced account",
+      account_type: "CASH",
+      currency: "USD",
+      is_default: false,
+      is_active: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const dek = (await crypto.deriveDek(rootKey, 1)).value;
+    const encryptedPayload = (await crypto.encrypt(dek, JSON.stringify(replayPayload))).value;
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_entity_metadata (
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        last_event_id TEXT NOT NULL,
+        last_client_timestamp TEXT NOT NULL,
+        last_op TEXT,
+        last_seq BIGINT NOT NULL,
+        PRIMARY KEY(entity, entity_id)
+      );
+      CREATE TABLE sync_applied_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        seq BIGINT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_table_state (
+        table_name TEXT PRIMARY KEY NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_incremental_apply_at TEXT
+      );
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL,
+        "group" TEXT,
+        currency TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        platform_id TEXT,
+        account_number TEXT,
+        meta TEXT,
+        provider TEXT,
+        provider_account_id TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        tracking_mode TEXT NOT NULL DEFAULT 'NOT_SET'
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 12, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 4);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      eventBus,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 13 });
+        }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          return Response.json({
+            from: 12,
+            to: 13,
+            next_cursor: 13,
+            has_more: false,
+            events: [
+              {
+                event_id: "remote-event-1",
+                device_id: "device-2",
+                type: "account.create.v1",
+                entity: "account",
+                entity_id: accountId,
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 1,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+                seq: 13,
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 5,
+        pulledCount: 1,
+        cursor: 13,
+      });
+      expect(events).toEqual([DEVICE_SYNC_PULL_COMPLETE_EVENT]);
+      expect(
+        db
+          .query<
+            { name: string; currency: string },
+            [string]
+          >("SELECT name, currency FROM accounts WHERE id = ?")
+          .get(accountId),
+      ).toEqual({ name: "Synced account", currency: "USD" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports local pairing source status preconditions before cloud cursor checks", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 10, '2026-01-01T00:00:00Z');
+    `);
+    db.prepare(
+      "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('legacy-device', 1, 'trusted', NULL)",
+    ).run();
+    let trustState = "untrusted";
+    let serverCursor = 8;
+    let failureMode: "none" | "device" | "cursor" | "bad-cursor" = "none";
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (failureMode === "cursor") {
+            throw new Error("cursor offline");
+          }
+          if (failureMode === "bad-cursor") {
+            return new Response('{"cursor":8,"gc_watermark":1.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return Response.json({ cursor: serverCursor });
+        }
+        if (failureMode === "device") {
+          throw new Error("device offline");
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: trustState,
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toThrow(
+        "No device ID configured",
+      );
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "No sync session configured",
+        status: 500,
+      });
+      secretService.entries.set("sync_refresh_token", "refresh-token");
+      failureMode = "device";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "device offline",
+        status: 500,
+      });
+      failureMode = "none";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Current device is not ready to connect another device yet.",
+        status: 500,
+      });
+
+      trustState = "trusted";
+      failureMode = "cursor";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "cursor offline",
+        status: 500,
+      });
+      failureMode = "bad-cursor";
+      await expect(service.getDeviceSyncPairingSourceStatus()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse cursor response",
+        status: 500,
+      });
+      failureMode = "none";
+      await expect(service.getDeviceSyncPairingSourceStatus()).resolves.toEqual({
+        status: "restore_required",
+        message: "This device needs to set up sync again before you add another device.",
+        localCursor: 10,
+        serverCursor: 8,
+      });
+      serverCursor = 10;
+      await expect(service.getDeviceSyncPairingSourceStatus()).resolves.toEqual({
+        status: "ready",
+        message: "This device is ready to connect another device.",
+        localCursor: 10,
+        serverCursor: 10,
+      });
+      expect(
+        requests.filter((request) => request.includes("/api/v1/sync/events/cursor")),
+      ).toHaveLength(4);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports local snapshot preconditions before cloud upload paths", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT
+      );
+    `);
+    db.prepare(
+      "INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at) VALUES ('legacy-device', 1, 'trusted', NULL)",
+    ).run();
+    const service = createLocalConnectDeviceSyncService({ db, secretService });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+      await expect(service.generateDeviceSnapshotNow()).rejects.toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+
+      secretService.entries.set("sync_identity", '{"version":2.0,"deviceId":"device-1"}');
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow(
+        "No sync identity configured. Please enable sync first.",
+      );
+
+      secretService.entries.set("sync_identity", JSON.stringify({ version: 2, deviceId: null }));
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toThrow("No device ID configured");
+
+      secretService.entries.set(
+        "sync_identity",
+        JSON.stringify({ version: 2, deviceId: "device-1" }),
+      );
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "forbidden",
+        status: 403,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips snapshot operations when cloud sync state is not ready", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "untrusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped_not_ready",
+        message: "Device is not in READY state",
+        snapshotId: null,
+        cursor: null,
+      });
+      await expect(service.generateDeviceSnapshotNow()).resolves.toEqual({
+        status: "skipped",
+        snapshotId: null,
+        oplogSeq: null,
+        message: "Current device is not trusted",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("handles trusted generate-snapshot pre-export cursor checks", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 10, '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    let serverCursor: number | "bad-gc" = 8;
+    let latestSnapshotOplogSeq: number | null = null;
+    let latestSnapshotBody: string | null = null;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (serverCursor === "bad-gc") {
+            return new Response('{"cursor":10,"gc_watermark":1.0}', {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return Response.json({ cursor: serverCursor });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (latestSnapshotBody !== null) {
+            return new Response(latestSnapshotBody, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (latestSnapshotOplogSeq === null) {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          return Response.json({
+            snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+            oplog_seq: latestSnapshotOplogSeq,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "SYNC_SOURCE_RESTORE_REQUIRED: This device needs to set up sync again before you add another device.",
+      });
+      serverCursor = "bad-gc";
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Failed to parse cursor response",
+      });
+      serverCursor = 10;
+      latestSnapshotOplogSeq = 10;
+      await expect(service.generateDeviceSnapshotNow()).resolves.toEqual({
+        status: "uploaded",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        oplogSeq: 10,
+        message: "Latest remote snapshot already covers current cursor",
+      });
+      latestSnapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740993,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:snapshot"}';
+      const overSafeResult = await service.generateDeviceSnapshotNow();
+      expect(overSafeResult).toEqual({
+        status: "uploaded",
+        snapshotId: "019bb9fe-f707-71e9-a40d-733575f4f246",
+        oplogSeq: null,
+        message: "Latest remote snapshot already covers current cursor",
+      });
+      expect(() => JSON.stringify(overSafeResult)).not.toThrow();
+      latestSnapshotBody = null;
+      latestSnapshotOplogSeq = 9;
+      await expect(service.generateDeviceSnapshotNow()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot export failed: No root key configured",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips bootstrap snapshot when READY local bootstrap is already complete", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 1, 'untrusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      expect(
+        db
+          .query<
+            { key_version: number | null; trust_state: string; last_bootstrap_at: string | null },
+            []
+          >("SELECT key_version, trust_state, last_bootstrap_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({
+        key_version: 2,
+        trust_state: "trusted",
+        last_bootstrap_at: "2026-01-01T00:00:00Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports latest snapshot parse errors when READY reconcile requires snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports latest snapshot parse errors when READY freshness gate is active", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requests bootstrap snapshot when READY freshness gate waits for upload", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requests bootstrap snapshot when latest snapshot is older than freshness gate", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-01-01T00:10:00Z');
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    let snapshotBody =
+      '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":42,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":128,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+    let cursorBody = '{"cursor":99,"latest_snapshot":null}';
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return snapshotDownloadResponse();
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return new Response(snapshotBody, { headers: { "content-type": "application/json" } });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          return new Response(cursorBody, { headers: { "content-type": "application/json" } });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+      snapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740992,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+      cursorBody = '{"cursor":9007199254740993,"latest_snapshot":null}';
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Waiting for a snapshot generated after pairing confirmation",
+        snapshotId: null,
+        cursor: 42,
+      });
+      snapshotBody =
+        '{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","oplog_seq":9007199254740993,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112"}';
+      cursorBody = '{"cursor":9007199254740992,"latest_snapshot":null}';
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot oplog_seq is outside JavaScript safe integer range",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("drops invalid bootstrap freshness gates before READY completed skip", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', '2026-02-30T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toMatchObject({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+      });
+      expect(
+        db
+          .query<
+            { min_snapshot_created_at: string | null },
+            []
+          >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'")
+          .get(),
+      ).toEqual({ min_snapshot_created_at: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips bootstrap snapshot when READY config persistence is best-effort", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        last_bootstrap_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 0, 'ok');
+      INSERT INTO sync_device_config (device_id, last_bootstrap_at)
+      VALUES ('device-1', '2026-01-01T00:00:00Z');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "Snapshot bootstrap already completed",
+        snapshotId: null,
+        cursor: 42,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks READY bootstrap complete when no remote snapshot is required", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    let reconcileMode: "malformed-snapshot" | "noop" = "malformed-snapshot";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          if (reconcileMode === "malformed-snapshot") {
+            return Response.json({
+              action: "NOOP",
+              latest_snapshot: {
+                snapshot_id: "snapshot-1",
+                oplog_seq: 99,
+              },
+            });
+          }
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Snapshot is not available yet. Waiting for upload from a trusted device.",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({
+        count: 1,
+      });
+      reconcileMode = "noop";
+      requests.length = 0;
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: 0,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({
+        count: 0,
+      });
+      expect(
+        db
+          .query<
+            {
+              key_version: number | null;
+              trust_state: string;
+              last_bootstrap_at: string | null;
+              min_snapshot_created_at: string | null;
+            },
+            []
+          >(
+            "SELECT key_version, trust_state, last_bootstrap_at, min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-1'",
+          )
+          .get(),
+      ).toMatchObject({
+        key_version: 2,
+        trust_state: "trusted",
+        min_snapshot_created_at: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks READY bootstrap complete when latest snapshot metadata is empty", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const requests: string[] = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        requests.push(String(input));
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "",
+            oplog_seq: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 0,
+            checksum: "sha256:empty",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          return Response.json({ cursor: 42, latest_snapshot: null });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: 0,
+      });
+      expect(requests).toEqual([
+        "https://auth.wealthfolio.app/auth/v1/token?grant_type=refresh_token",
+        "https://api.example.test/api/v1/sync/team/devices/device-1",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+        "https://api.example.test/api/v1/sync/snapshots/latest",
+        "https://api.example.test/api/v1/sync/events/cursor",
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
+      ]);
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports READY bootstrap latest snapshot metadata parse errors", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    let latestSnapshotResponse: Record<string, unknown> = {
+      snapshot_id: "",
+      oplog_seq: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      schema_version: 1,
+      covers_tables: [],
+    };
+    let latestSnapshotRawText: string | null = null;
+    let cursorResponse: Record<string, unknown> = { cursor: 42, latest_snapshot: null };
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (latestSnapshotRawText !== null) {
+            return new Response(latestSnapshotRawText, {
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return Response.json(latestSnapshotResponse);
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          return Response.json(cursorResponse);
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      latestSnapshotRawText =
+        '{"snapshot_id":"","oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      latestSnapshotRawText =
+        '{"snapshot_id":"","oplog_seq":0,"oplog_seq":0.0,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":0,"checksum":"sha256:empty"}';
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      latestSnapshotRawText = null;
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+      latestSnapshotResponse = {
+        snapshot_id: "",
+        oplog_seq: 0.5,
+        created_at: "2026-01-01T00:00:00Z",
+        schema_version: 1,
+        covers_tables: [42],
+        size_bytes: 0,
+        checksum: "sha256:empty",
+      };
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+      latestSnapshotResponse = {
+        snapshot_id: "",
+        oplog_seq: Number.MAX_SAFE_INTEGER + 1,
+        created_at: "2026-01-01T00:00:00Z",
+        schema_version: 2147483648,
+        covers_tables: [],
+        size_bytes: 0,
+        checksum: "sha256:empty",
+      };
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+      latestSnapshotResponse = {
+        snapshot_id: "",
+        oplog_seq: 0,
+        created_at: "2026-01-01T00:00:00Z",
+        schema_version: 1,
+        covers_tables: [],
+        size_bytes: 0,
+        checksum: "sha256:empty",
+      };
+      cursorResponse = { cursor: 42, gc_watermark: "bad", latest_snapshot: null };
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Failed to parse latest snapshot response",
+        status: 500,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks completed READY bootstrap complete after reconcile snapshot race clears", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', '2026-01-01T00:00:00Z', NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const reconcileActions = ["WAIT_SNAPSHOT", "NOOP"];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: reconcileActions.shift() ?? "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "skipped",
+        message: "No remote snapshot is required for this device",
+        snapshotId: null,
+        cursor: 0,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requests READY bootstrap when missing snapshot reconcile still waits", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json(
+            { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+            { status: 404 },
+          );
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "WAIT_SNAPSHOT" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).resolves.toEqual({
+        status: "requested",
+        message: "Waiting for a trusted device to upload a snapshot",
+        snapshotId: null,
+        cursor: 42,
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports newer snapshot schema before bootstrap apply", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 2,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports bootstrap snapshot download preflight errors", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    let mode:
+      | "missing"
+      | "transport"
+      | "body"
+      | "rate-limit"
+      | "malformed-rate-limit"
+      | "missing-schema-header"
+      | "bad-schema-header"
+      | "missing-covers-header"
+      | "missing-checksum-header"
+      | "bad-header"
+      | "bad-metadata" = "missing";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          if (mode === "missing") {
+            return Response.json(
+              { code: "SNAPSHOT_NOT_FOUND", message: "not found" },
+              { status: 404 },
+            );
+          }
+          if (mode === "transport") {
+            throw new Error("snapshot download offline");
+          }
+          if (mode === "rate-limit") {
+            return Response.json({ code: "RATE_LIMIT", message: "slow down" }, { status: 429 });
+          }
+          if (mode === "malformed-rate-limit") {
+            return new Response('{"code":"RATE_LIMIT","message":"slow down","message":"later"}', {
+              status: 429,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (mode === "body") {
+            return {
+              ok: true,
+              status: 200,
+              headers: snapshotDownloadResponse().headers,
+              arrayBuffer: async () => {
+                throw new Error("snapshot body unreadable");
+              },
+            } as unknown as Response;
+          }
+          if (mode === "missing-schema-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-schema-version": null });
+          }
+          if (mode === "bad-schema-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-schema-version": "1.5" });
+          }
+          if (mode === "missing-covers-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-covers-tables": null });
+          }
+          if (mode === "missing-checksum-header") {
+            return snapshotDownloadResponse(undefined, { "x-snapshot-checksum": null });
+          }
+          return snapshotDownloadResponse(mode === "bad-header" ? "sha256:bad" : undefined);
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum:
+              mode === "bad-metadata"
+                ? "sha256:bad-metadata"
+                : "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot snapshot-1 is no longer available. No valid snapshot to download.",
+      });
+      mode = "transport";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "snapshot download offline",
+      });
+      mode = "body";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "snapshot body unreadable",
+      });
+      mode = "rate-limit";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "API error (429): RATE_LIMIT: slow down",
+      });
+      mode = "malformed-rate-limit";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          'API error (429): Request failed: {"code":"RATE_LIMIT","message":"slow down","message":"later"}',
+      });
+      mode = "missing-schema-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-schema-version",
+      });
+      mode = "bad-schema-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Invalid header x-snapshot-schema-version",
+      });
+      mode = "missing-covers-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-covers-tables",
+      });
+      mode = "missing-checksum-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Invalid request: Missing header x-snapshot-checksum",
+      });
+      mode = "bad-header";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "Snapshot checksum mismatch (download header): expected=sha256:bad, got=sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+      });
+      mode = "bad-metadata";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message:
+          "Snapshot checksum mismatch (latest metadata): expected=sha256:bad-metadata, got=sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses cursor fallback schema for non-UUID latest snapshot metadata", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    let latestSchemaVersion = 2;
+    let cursorSchemaVersion = 1;
+    let cursorMode:
+      | "normal"
+      | "duplicate-latest"
+      | "duplicate-null-latest"
+      | "bad-gc"
+      | "over-safe-non-strict" = "duplicate-latest";
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246")) {
+          return snapshotDownloadResponse();
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          if (cursorMode === "over-safe-non-strict") {
+            return new Response(
+              '{"snapshot_id":"legacy-snapshot-id","oplog_seq":9007199254740992,"created_at":"2026-01-01T00:00:00Z","schema_version":1,"covers_tables":[],"size_bytes":9007199254740993,"checksum":"sha256:snapshot"}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return Response.json({
+            snapshot_id: "legacy-snapshot-id",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: latestSchemaVersion,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:snapshot",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          if (cursorMode === "duplicate-latest") {
+            return new Response(
+              '{"cursor":42,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42},"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42.0}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (cursorMode === "duplicate-null-latest") {
+            return new Response(
+              '{"cursor":42,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42},"latest_snapshot":null}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (cursorMode === "bad-gc") {
+            return new Response(
+              '{"cursor":42,"gc_watermark":1.0,"latest_snapshot":{"snapshot_id":"019bb9fe-f707-71e9-a40d-733575f4f246","schema_version":1,"oplog_seq":42}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          if (cursorMode === "over-safe-non-strict") {
+            return new Response(
+              '{"cursor":9007199254740994,"latest_snapshot":{"snapshot_id":"legacy-cursor-id","schema_version":2,"oplog_seq":9007199254740993}}',
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return Response.json({
+            cursor: 42,
+            latest_snapshot: {
+              snapshot_id: "019bb9fe-f707-71e9-a40d-733575f4f246",
+              schema_version: cursorSchemaVersion,
+              oplog_seq: 42,
+            },
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "duplicate-null-latest";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "bad-gc";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      cursorMode = "normal";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
+      });
+      latestSchemaVersion = 1;
+      cursorSchemaVersion = 2;
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      latestSchemaVersion = 1;
+      cursorSchemaVersion = 1;
+      cursorMode = "over-safe-non-strict";
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Snapshot schema version 2 is newer than local version 1. Please update the app.",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps READY bootstrap bounded at snapshot decode when latest snapshot exists", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          return snapshotDownloadResponse();
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "snapshot-1",
+            oplog_seq: 42,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 128,
+            checksum: "sha256:16a0eeb0791b6c92451fd284dd9f599e0a7dbe7f6ebea6e2d2d06c7f74aec112",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps READY bootstrap bounded at snapshot decode when cursor fallback has latest snapshot", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'trusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_outbox (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 42, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, last_cycle_status) VALUES (1, 7, 'ok');
+      INSERT INTO sync_device_config (
+        device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
+      ) VALUES ('device-1', 2, 'trusted', NULL, NULL);
+      INSERT INTO sync_outbox (id) VALUES ('event-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey: "root-key",
+        keyVersion: 2,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/snapshot-1")) {
+          return snapshotDownloadResponse();
+        }
+        if (String(input).includes("/api/v1/sync/snapshots/latest")) {
+          return Response.json({
+            snapshot_id: "",
+            oplog_seq: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            schema_version: 1,
+            covers_tables: [],
+            size_bytes: 0,
+            checksum: "sha256:empty",
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/cursor")) {
+          return Response.json({
+            cursor: 42,
+            latest_snapshot: {
+              snapshot_id: "snapshot-1",
+              schema_version: 1,
+              oplog_seq: 42,
+            },
+          });
+        }
+        if (String(input).includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 2,
+        });
+      },
+    });
+
+    try {
+      await expect(service.bootstrapDeviceSnapshot()).rejects.toMatchObject({
+        code: "internal_error",
+        status: 500,
+        message: "Failed to derive snapshot DEK: Invalid root key: invalid base64",
+      });
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM sync_outbox").get(),
+      ).toEqual({ count: 1 });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("localNotReadyBackoffMs", () => {
+  test("returns 0 for consecutiveNotReady <= DEVICE_SYNC_NOT_READY_BACKOFF_AFTER (5)", () => {
+    expect(localNotReadyBackoffMs(0)).toBe(0);
+    expect(localNotReadyBackoffMs(1)).toBe(0);
+    expect(localNotReadyBackoffMs(5)).toBe(0);
+  });
+
+  test("returns 1x base interval (5 min) for consecutiveNotReady = 6", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(6)).toBe(baseMs * Math.pow(2, 1)); // 10 min
+  });
+
+  test("returns 2x base interval (5 min) for consecutiveNotReady = 7", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(7)).toBe(baseMs * Math.pow(2, 2)); // 20 min
+  });
+
+  test("returns 3x base interval (5 min) for consecutiveNotReady = 8", () => {
+    const baseMs = 5 * 60 * 1000;
+    expect(localNotReadyBackoffMs(8)).toBe(baseMs * Math.pow(2, 3)); // 40 min
+  });
+
+  test("caps at 1 hour for consecutiveNotReady >= 9", () => {
+    const capMs = 60 * 60 * 1000;
+    // 5 min * 2^4 = 80 min > 60 min cap
+    expect(localNotReadyBackoffMs(9)).toBe(capMs);
+    expect(localNotReadyBackoffMs(10)).toBe(capMs);
+    expect(localNotReadyBackoffMs(100)).toBe(capMs);
+  });
+});

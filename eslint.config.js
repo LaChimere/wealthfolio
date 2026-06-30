@@ -6,7 +6,6 @@ export default [
     ignores: [
       "dist/**",
       "node_modules/**",
-      "apps/tauri/**",
       "apps/server/**",
       "apps/frontend/**",
       "*.config.js",

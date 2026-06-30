@@ -1,8 +1,0 @@
-packages:
-  - "apps/frontend"
-  - "packages/*"
-
-ignoredBuiltDependencies:
-  - "@tailwindcss/oxide"
-  - esbuild
-  - msw

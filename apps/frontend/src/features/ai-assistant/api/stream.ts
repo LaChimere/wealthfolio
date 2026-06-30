@@ -2,7 +2,7 @@
  * AI Chat Streaming API client.
  *
  * Re-exports the streaming function from the adapter layer.
- * The adapter handles environment detection (Tauri vs Web) at build time.
+ * The adapter handles environment detection at build time.
  */
 
 import { streamAiChat } from "@/adapters";
@@ -19,7 +19,7 @@ export type ChatModelConfig = AiChatModelConfig;
  * Stream chat response events from the AI assistant.
  *
  * The adapter handles environment detection at build time:
- * - Tauri (desktop): Uses IPC with Channel for streaming
+ * - Electron desktop: Uses IPC-mediated NDJSON streaming
  * - Web: Uses HTTP fetch with NDJSON streaming
  *
  * @param request - The chat message request

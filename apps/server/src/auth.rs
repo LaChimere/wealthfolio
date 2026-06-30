@@ -350,6 +350,49 @@ pub async fn require_jwt(
     Ok(response)
 }
 
+pub async fn require_sidecar_token(
+    State(expected_token): State<Arc<String>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, AuthError> {
+    if sidecar_token_authorized(request.headers(), &expected_token) {
+        Ok(next.run(request).await)
+    } else {
+        Err(AuthError::Unauthorized)
+    }
+}
+
+fn sidecar_token_authorized(headers: &HeaderMap, expected_token: &str) -> bool {
+    let Some(header_value) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+
+    let mut parts = header_value.splitn(2, ' ');
+    let (Some(scheme), Some(token)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return false;
+    }
+
+    constant_time_eq(token.trim().as_bytes(), expected_token.as_bytes())
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    let max_len = left.len().max(right.len());
+    let mut diff = left.len() ^ right.len();
+    for index in 0..max_len {
+        let left_byte = left.get(index).copied().unwrap_or(0);
+        let right_byte = right.get(index).copied().unwrap_or(0);
+        diff |= usize::from(left_byte ^ right_byte);
+    }
+    diff == 0
+}
+
 fn extract_token(request: &Request<Body>) -> Result<String, AuthError> {
     // 1. Authorization header (Bearer token)
     if let Some(header_value) = request
@@ -469,5 +512,47 @@ mod tests {
     fn never_with_https_header() {
         let mgr = make_manager(CookieSecurePolicy::Never);
         assert!(!mgr.should_secure_cookie(&headers_with_proto("https")));
+    }
+
+    #[test]
+    fn sidecar_token_accepts_matching_bearer_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer expected-token"),
+        );
+
+        assert!(sidecar_token_authorized(&headers, "expected-token"));
+    }
+
+    #[test]
+    fn sidecar_token_rejects_missing_wrong_or_empty_tokens() {
+        assert!(!sidecar_token_authorized(
+            &HeaderMap::new(),
+            "expected-token"
+        ));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Basic expected-token"),
+        );
+        assert!(!sidecar_token_authorized(&headers, "expected-token"));
+
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer wrong-token"),
+        );
+        assert!(!sidecar_token_authorized(&headers, "expected-token"));
+
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer "));
+        assert!(!sidecar_token_authorized(&headers, "expected-token"));
+    }
+
+    #[test]
+    fn constant_time_eq_compares_full_inputs() {
+        assert!(constant_time_eq(b"same-token", b"same-token"));
+        assert!(!constant_time_eq(b"same-token", b"same-tokem"));
+        assert!(!constant_time_eq(b"short", b"shorter"));
     }
 }

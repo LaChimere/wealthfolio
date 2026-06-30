@@ -11,6 +11,7 @@
     "noImplicitOverride": false, // Allow class components without override
 
     // Path mapping for UI package
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]

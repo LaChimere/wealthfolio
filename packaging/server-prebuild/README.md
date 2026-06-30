@@ -1,27 +1,32 @@
-# Wealthfolio Server — Linux amd64 prebuild
+# Wealthfolio Backend — Linux amd64 prebuild
 
-Standalone HTTP server build for self-hosting (no Tauri, no desktop runtime).
-Built on Ubuntu 22.04 (glibc 2.35) — runs on Debian 12+, Ubuntu 22.04+, and
-derivatives.
+Standalone Bun/TypeScript HTTP backend build for self-hosting (no desktop
+runtime). Built as a Linux x64 baseline executable for Debian 12+, Ubuntu
+22.04+, and derivatives.
 
 ## Layout
 
-- `wealthfolio-server` — server binary (install to `/usr/local/bin/`)
+- `wealthfolio-backend` — backend binary (install to `/usr/local/bin/`)
 - `dist/` — frontend static assets (point `WF_STATIC_DIR` here)
+- `backend-assets/` — SQLite migrations and runtime catalogs
 - `wealthfolio.service.example` — sample systemd unit
 - `LICENSE`
 
 ## Quick start
 
 ```bash
-sudo install -m 755 wealthfolio-server /usr/local/bin/wealthfolio-server
+sudo install -m 755 wealthfolio-backend /usr/local/bin/wealthfolio-backend
 sudo mkdir -p /opt/wealthfolio /opt/wealthfolio_data
 sudo cp -r dist /opt/wealthfolio/dist
+sudo cp -r backend-assets /opt/wealthfolio/backend-assets
 
 sudo tee /opt/wealthfolio/.env >/dev/null <<EOF
 WF_LISTEN_ADDR=0.0.0.0:8080
 WF_DB_PATH=/opt/wealthfolio_data/wealthfolio.db
 WF_STATIC_DIR=/opt/wealthfolio/dist
+WF_MIGRATIONS_DIR=/opt/wealthfolio/backend-assets/migrations
+WF_EXCHANGE_CATALOG_PATH=/opt/wealthfolio/backend-assets/exchanges.json
+WF_AI_PROVIDER_CATALOG_PATH=/opt/wealthfolio/backend-assets/ai_providers.json
 WF_SECRET_KEY=$(openssl rand -base64 32)
 WF_AUTH_PASSWORD_HASH=<argon2id hash, see docs/self-host>
 # Required when auth is enabled AND you reach the server via a different

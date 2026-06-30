@@ -6,8 +6,7 @@ interface ExternalLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement
 }
 
 /**
- * Anchor element that opens URLs via the platform adapter (Tauri shell / window.open).
- * Necessary because `<a target="_blank">` is silently ignored inside Tauri's WKWebView on iOS.
+ * Anchor element that opens URLs via the platform adapter.
  * Renders a normal `<a>` for semantics/accessibility; click is handled by `openUrlInBrowser`.
  */
 export const ExternalLink = forwardRef<HTMLAnchorElement, ExternalLinkProps>(

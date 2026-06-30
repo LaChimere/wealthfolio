@@ -1,5 +1,5 @@
 // src/lockdown.ts
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { logger, RUN_ENV, RunEnvs, toggleWindowFullscreen } from "@/adapters";
 
 const isEditable = (el: EventTarget | null) =>
   el instanceof HTMLElement &&
@@ -26,13 +26,15 @@ export function installLockdown() {
 
     // Handle F11 for fullscreen toggle
     if (k === "f11") {
+      if (RUN_ENV === RunEnvs.ELECTRON) {
+        return;
+      }
+
       e.preventDefault();
       try {
-        const appWindow = getCurrentWindow();
-        const isFullscreen = await appWindow.isFullscreen();
-        await appWindow.setFullscreen(!isFullscreen);
+        await toggleWindowFullscreen();
       } catch (error) {
-        console.error("Failed to toggle fullscreen:", error);
+        logger.error("Failed to toggle fullscreen:", error);
       }
       return;
     }

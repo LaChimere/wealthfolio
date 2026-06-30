@@ -1,0 +1,31 @@
+{
+  "name": "@wealthfolio/backend",
+  "private": true,
+  "version": "3.4.0",
+  "type": "module",
+  "description": "Bun TypeScript backend runtime for Wealthfolio.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "build:types": "tsc -p tsconfig.json",
+    "type-check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.13",
+    "@types/node": "^25.7.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^1.3.0",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "cheerio": "^1.2.0",
+    "decimal.js": "^10.6.0",
+    "domhandler": "^6.0.1",
+    "fflate": "^0.8.3",
+    "jsonpath-plus": "^10.4.0"
+  }
+}

@@ -130,9 +130,9 @@ See [ROADMAP.md](./ROADMAP.md).
 Ensure you have the following installed on your machine:
 
 - [Node.js](https://nodejs.org/)
-- [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/)
-- [Tauri](https://tauri.app/)
+- [Bun](https://bun.com/)
+- [Rust](https://www.rust-lang.org/) only when working on legacy compatibility
+  crates or Rust parity checks
 
 ### Building from Source
 
@@ -143,10 +143,10 @@ Ensure you have the following installed on your machine:
    cd wealthfolio
    ```
 
-2. **Install dependencies using pnpm**:
+2. **Install dependencies using Bun**:
 
    ```bash
-   pnpm install
+   bun install
    ```
 
 3. **Setup environment configuration**:
@@ -157,36 +157,37 @@ Ensure you have the following installed on your machine:
    cp .env.example .env
    ```
 
-   Update the `.env` file with your database path and other configuration as
-   needed:
-
-   ```bash
-   # Database location
-   DATABASE_URL=../db/wealthfolio.db
-   ```
+   The `.env` file carries Wealthfolio Connect build-time variables
+   (`CONNECT_AUTH_URL`, `CONNECT_AUTH_PUBLISHABLE_KEY`, etc.). The Electron
+   desktop app manages its database path automatically; web mode uses
+   `WF_DB_PATH` from `.env.web`.
 
 4. **Run in Development Mode**:
 
-Build and run the desktop application using Tauri:
+Build and run the desktop application using Electron:
 
 ```bash
-pnpm tauri dev
+bun run dev:electron
 ```
+
+Electron development uses an isolated desktop data root
+(`com.teymz.wealthfolio.dev`) and a separate keyring namespace, so it does not
+read or mutate data from an installed production Wealthfolio app.
 
 #### Addon Development Mode
 
 Addon hot reload servers now start only when you explicitly opt in.
 
-**For desktop development with Tauri:**
+**For desktop development with Electron:**
 
 ```bash
-VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev
+VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron
 ```
 
-**For browser-only development (Vite only, no Tauri):**
+**For browser-only development (Vite only, no Electron shell):**
 
 ```bash
-pnpm dev:addons
+bun run dev:addons
 ```
 
 You can also set `VITE_ENABLE_ADDON_DEV_MODE=true` in your `.env` file to
@@ -197,12 +198,12 @@ persist the setting.
 Build the application for production:
 
 ```bash
-pnpm tauri build
+bun run package:electron
 ```
 
 ### Web Mode (Browser + REST API server)
 
-Run the web UI with a local Axum server with one command.
+Run the web UI with a local Bun TypeScript backend with one command.
 
 #### Quick Start
 
@@ -220,11 +221,11 @@ Run the web UI with a local Axum server with one command.
 2. **Start both backend and Vite dev server**:
 
    ```bash
-   pnpm run dev:web
+   bun run dev:web
    ```
 
    The Vite dev server runs at `http://localhost:1420` and proxies API calls to
-   the Axum backend server.
+   the Bun TypeScript backend server.
 
 #### Configuration
 
@@ -257,8 +258,12 @@ All configuration is done via environment variables in `.env.web`.
   - `true` - always set `Secure` (use when TLS is guaranteed but the header is
     absent)
   - `false` - never set `Secure` (plain HTTP without a reverse proxy)
-- `WF_SECRET_FILE` - **Optional** path to secrets storage file (default:
-  `<data-root>/secrets.json`)
+- `WF_SECRET_BACKEND` - **Optional** secret-store backend: `file` for
+  web/self-hosted mode (default), or `keyring` for desktop sidecar builds using
+  the packaged TypeScript backend's native keyring binding
+- `WF_SECRET_FILE` - **Optional** path to encrypted file-backed secrets storage
+  (default: `<data-root>/secrets.json`; ignored when
+  `WF_SECRET_BACKEND=keyring`)
 - `WF_ADDONS_DIR` - **Optional** path to addons directory (default: derived from
   database path)
 
@@ -320,10 +325,11 @@ All configuration is done via environment variables in `.env.web`.
 
 ### Server Only
 
-Run just the HTTP server without the Vite dev server (from repo root):
+Run just the Bun TypeScript HTTP backend without the Vite dev server (from repo
+root):
 
 ```bash
-cargo run --manifest-path apps/server/Cargo.toml
+bun run --cwd apps/backend start
 ```
 
 The server accepts the same `WF_*` environment variables as documented in the
@@ -331,7 +337,7 @@ The server accepts the same `WF_*` environment variables as documented in the
 or via `.env.web`:
 
 ```bash
-WF_LISTEN_ADDR=127.0.0.1:8080 WF_DB_PATH=./db/app.db cargo run --manifest-path apps/server/Cargo.toml
+WF_LISTEN_ADDR=127.0.0.1:8080 WF_DB_PATH=./db/app.db bun run --cwd apps/backend start
 ```
 
 See [Web Mode Configuration](#configuration) for a complete list of supported
@@ -366,14 +372,14 @@ docker build -t wealthfolio .
 
 The build process:
 
-1. Builds frontend assets from source (`pnpm install` + `pnpm vite build`)
-2. Compiles Rust backend from source (`cargo build --release`)
+1. Builds frontend assets from source (`bun install` + `bun run build`)
+2. Installs Bun TypeScript backend production dependencies
 3. Creates minimal Alpine-based image with only the runtime artifacts
 
 The final image includes:
 
 - Compiled frontend assets in `/app/dist`
-- `wealthfolio-server` binary at `/usr/local/bin/wealthfolio-server`
+- Bun TypeScript backend in `/app/apps/backend`
 - Alpine Linux base (small footprint)
 
 ### Configuration
@@ -504,9 +510,10 @@ steps and provides an isolated environment with all necessary dependencies.
 
 #### Features
 
-- Pre-configured Tauri development environment
+- Pre-configured desktop/web development environment
 - X11 virtual display with VNC access (port 5900)
-- Complete Rust development setup
+- TypeScript/Bun development setup with legacy Rust tooling for compatibility
+  checks
 - GPU support (via Docker's --gpus=all flag)
 - Persistent data and build caches
 - Essential VS Code extensions pre-installed
@@ -546,20 +553,20 @@ functionality with custom features.
 1. **Create a new addon**:
 
    ```bash
-   npx @wealthfolio/addon-dev-tools create my-addon
+   bun x @wealthfolio/addon-dev-tools create my-addon
    cd my-addon
-   npm install
+   bun install
    ```
 
 2. **Start development server**:
 
    ```bash
-   npm run dev:server
+   bun run dev:server
    ```
 
 3. **Start Wealthfolio in addon development mode** (in another terminal):
    ```bash
-   VITE_ENABLE_ADDON_DEV_MODE=true pnpm tauri dev
+   VITE_ENABLE_ADDON_DEV_MODE=true bun run dev:electron
    ```
 
 Your addon will be automatically discovered and loaded with hot reload support!
@@ -606,8 +613,13 @@ for maintained addon examples including:
 
 ### Backend
 
-- **Tauri**: Framework for building tiny, secure, and fast desktop applications.
-- **Rust**: Systems programming language for core backend functionality.
+- **Electron**: Desktop shell, native integrations, packaging, and updates.
+- **Bun TypeScript backend**: Local web, Docker, packaged Electron sidecar, and
+  standalone prebuild runtime.
+- **Rust**: Systems programming language for legacy compatibility/reference
+  crates.
+- **Axum**: HTTP framework used by the legacy Rust compatibility/reference
+  server during migration.
 - **SQLite**: Embedded database for local data storage.
 - **Diesel**: Safe, extensible ORM and query builder for Rust.
 
@@ -625,7 +637,7 @@ for maintained addon examples including:
 - **TypeScript**: Typed superset of JavaScript.
 - **ESLint**: Pluggable linting utility for JavaScript and JSX.
 - **Prettier**: Code formatter.
-- **pnpm**: Fast, disk space efficient package manager.
+- **Bun**: JavaScript runtime and package manager.
 - **Turborepo**: High-performance build system for JavaScript and TypeScript
   codebases.
 
@@ -636,7 +648,7 @@ wealthfolio/
 ├── apps/                        # Application packages
 │   ├── frontend/                # React frontend application
 │   │   ├── src/                 # Source code
-│   │   │   ├── adapters/        # Environment adapters (Tauri/Web)
+│   │   │   ├── adapters/        # Environment adapters (Electron/Web)
 │   │   │   ├── addons/          # Addon system runtime
 │   │   │   ├── components/      # React components
 │   │   │   ├── features/        # Feature modules (self-contained)
@@ -646,8 +658,9 @@ wealthfolio/
 │   │   ├── public/              # Static assets
 │   │   ├── index.html           # HTML entry point
 │   │   └── vite.config.ts       # Vite build config
-│   ├── tauri/                   # Tauri desktop/mobile app (Rust IPC commands)
-│   └── server/                  # Axum HTTP server for web mode
+│   ├── backend/                 # Bun TypeScript backend runtime
+│   ├── electron/                # Electron main/preload desktop shell
+│   └── server/                  # Legacy Rust compatibility/reference server
 ├── crates/                      # Rust crates (shared backend logic)
 │   ├── core/                    # Core business logic, services, models
 │   ├── storage-sqlite/          # SQLite storage layer (Diesel ORM)
@@ -664,9 +677,9 @@ wealthfolio/
 │   └── architecture/            # Architecture docs
 ├── e2e/                         # End-to-end tests
 ├── scripts/                     # Build and dev scripts
-├── Cargo.toml                   # Rust workspace config
-├── package.json                 # Node.js dependencies
-├── pnpm-workspace.yaml          # pnpm workspace config
+├── Cargo.toml                   # Legacy Rust compatibility workspace config
+├── package.json                 # JavaScript workspace and scripts
+├── bun.lock                     # Bun lockfile
 └── tsconfig.json                # TypeScript config
 ```
 
@@ -688,13 +701,14 @@ dependencies:
 
 #### API Keys & Secrets
 
-API credentials are securely stored using the operating system keyring through
-the `keyring` crate:
+Desktop API credentials are securely stored using the operating system keyring
+through the TypeScript backend's native keyring binding:
 
 - **Core App**: Use `set_secret` and `get_secret` commands for external services
 - **Addons**: Use the Secrets API (`ctx.api.secrets`) for addon-specific
   sensitive data
-- **No Disk Storage**: Keys never written to disk or configuration files
+- **No Disk Storage in Desktop Mode**: Keys never written to disk or
+  configuration files
 
 #### Permission System
 

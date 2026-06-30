@@ -165,13 +165,13 @@ automatically apply to:
 
 ```bash
 # Build the package
-pnpm build
+bun run build
 
 # Watch for changes
-pnpm dev
+bun run dev
 
 # Type check
-pnpm lint
+bun run type-check
 ```
 
 ### For Main App Development

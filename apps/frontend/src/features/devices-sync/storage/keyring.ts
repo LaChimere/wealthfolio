@@ -1,5 +1,5 @@
 // Keyring storage wrapper for sync-related secrets
-// Uses the existing Tauri keyring integration via secrets commands
+// Uses the desktop keyring integration via secrets commands
 // =================================================================
 
 import { getSecret, setSecret, logger } from "@/adapters";

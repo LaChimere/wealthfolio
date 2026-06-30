@@ -9,6 +9,7 @@ import { useIsMobileViewport, usePlatform } from "@/hooks/use-platform";
 import { useSettings } from "@/hooks/use-settings";
 import { cn } from "@/lib/utils";
 import { MobileNavigationContainer } from "@/pages/layouts/mobile-navigation-container";
+import { Button } from "@wealthfolio/ui/components/ui/button";
 import useGlobalEventListener from "@/use-global-event-listener";
 import { ApplicationShell, ErrorBoundary, PageScrollContainer } from "@wealthfolio/ui";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
@@ -19,10 +20,17 @@ import { MobileNavBar } from "./navigation/mobile-navbar";
 import { NavigationModeProvider, useNavigationMode } from "./navigation/navigation-mode-context";
 
 const AppLayoutContent = () => {
-  const { data: settings, isSuccess: isSettingsReady } = useSettings();
+  const {
+    data: settings,
+    error: settingsError,
+    isError: isSettingsError,
+    isFetching: isSettingsFetching,
+    isSuccess: isSettingsReady,
+    refetch: refetchSettings,
+  } = useSettings();
   const location = useLocation();
   const navigation = useNavigation();
-  const { isMobile, isTauri } = usePlatform();
+  const { isMobile, isDesktop } = usePlatform();
   const isMobileViewport = useIsMobileViewport();
   const isIPad =
     typeof window !== "undefined" &&
@@ -37,7 +45,35 @@ const AppLayoutContent = () => {
 
   useGlobalEventListener();
   useNavigationEventListener();
-  useActiveAppSyncTrigger({ enabled: isTauri, requireWindowFocusForInterval: !isMobile });
+  useActiveAppSyncTrigger({ enabled: isDesktop, requireWindowFocusForInterval: !isMobile });
+
+  if (isSettingsError) {
+    return (
+      <div
+        className="flex h-screen items-center justify-center"
+        style={{ backgroundColor: "#09090b" }}
+      >
+        <div className="flex max-w-md flex-col items-center gap-4 px-6 text-center text-zinc-100">
+          <img src="/logo-gold.png" alt="Wealthfolio" className="h-[100px] w-auto" />
+          <div className="space-y-2">
+            <h1 className="text-lg font-semibold">Unable to load settings</h1>
+            <p className="text-sm text-zinc-400">
+              {settingsError?.message || "Wealthfolio could not load app settings."}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            disabled={isSettingsFetching}
+            onClick={() => {
+              void refetchSettings();
+            }}
+          >
+            {isSettingsFetching ? "Retrying..." : "Retry"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (!isSettingsReady) {
     return (
@@ -79,7 +115,7 @@ const AppLayoutContent = () => {
         >
           <main className="relative flex min-h-0 w-full max-w-full flex-1 flex-col overflow-x-hidden">
             <div
-              data-tauri-drag-region="true"
+              data-desktop-drag-region="true"
               className="draggable pointer-events-auto absolute inset-x-0 top-0 z-50 h-6 cursor-grab opacity-0"
             ></div>
             {shouldUseMobileNavigation ? (

@@ -12,26 +12,26 @@
     "dev:server": "wealthfolio dev",
     "clean": "rm -rf dist",
     "package": "mkdir -p dist && zip -r dist/$npm_package_name-$npm_package_version.zip manifest.json dist/ assets/ README.md",
-    "bundle": "pnpm clean && pnpm build && pnpm package",
+    "bundle": "bun run clean && bun run build && bun run package",
     "lint": "tsc --noEmit",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@wealthfolio/addon-sdk": "^2.0.0",
-    "@wealthfolio/ui": "^2.0.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "@wealthfolio/addon-sdk": "^3.4.0",
+    "@wealthfolio/ui": "^3.4.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.13",
-    "@wealthfolio/addon-dev-tools": "^2.0.0",
-    "@types/node": "^20.0.0",
-    "@types/react": "^19.1.1",
-    "@types/react-dom": "^19.1.1",
-    "@vitejs/plugin-react": "^5.0.2",
+    "@tailwindcss/vite": "^4.1.18",
+    "@wealthfolio/addon-dev-tools": "^3.4.0",
+    "@types/node": "^24.10.13",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
     "rollup-plugin-external-globals": "^0.13.0",
-    "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "tailwindcss": "^4.1.18",
+    "typescript": "^6.0.3",
+    "vite": "^7.3.2"
   }
 }

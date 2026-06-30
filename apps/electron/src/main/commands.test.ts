@@ -1,0 +1,4160 @@
+import { describe, expect, test } from "bun:test";
+
+import type { ElectronCommand } from "../shared/ipc";
+import { invokeSidecarCommand } from "./commands";
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+    ...init,
+  });
+}
+
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+describe("Electron sidecar command proxy", () => {
+  test("proxies get_accounts through Electron main with sidecar auth", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse([{ id: "account-1" }]));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_accounts",
+        payload: { includeArchived: false },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ id: "account-1" }]);
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts");
+    expect(init?.method).toBe("GET");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("adds includeArchived query only when requested", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_accounts",
+      payload: { includeArchived: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual(["http://127.0.0.1:18444/api/v1/accounts?includeArchived=true"]);
+  });
+
+  test("proxies create_account with the account request body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "account-2" }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "create_account",
+        payload: { account: { name: "Brokerage", currency: "USD" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ id: "account-2" });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(init?.body).toBe(JSON.stringify({ name: "Brokerage", currency: "USD" }));
+  });
+
+  test("proxies update_account with an encoded account id", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "acct 3" }));
+    };
+
+    await invokeSidecarCommand({
+      command: "update_account",
+      payload: { accountUpdate: { id: "acct 3", name: "Updated" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts/acct%203");
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(JSON.stringify({ id: "acct 3", name: "Updated" }));
+  });
+
+  test("proxies delete_account with an encoded account id", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_account",
+        payload: { accountId: "acct/4" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/accounts/acct%2F4");
+    expect(init?.method).toBe("DELETE");
+  });
+
+  test("rejects malformed account command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_account",
+        payload: { accountUpdate: { name: "Missing ID" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "update_account" requires string payload field "accountUpdate.id".',
+    );
+  });
+
+  test("proxies portfolio CRUD commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ id: "portfolio 1" }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "get_portfolios",
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_portfolio",
+      payload: { portfolio: { name: "Core", accountIds: ["account-1"] } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_portfolio_entry",
+      payload: { portfolio: { id: "portfolio 1", name: "Updated", accountIds: ["account-1"] } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_portfolio_entry",
+      payload: { portfolioId: "portfolio/1" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/portfolios", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/portfolios",
+        "POST",
+        JSON.stringify({ name: "Core", accountIds: ["account-1"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/portfolios/portfolio%201",
+        "PUT",
+        JSON.stringify({ id: "portfolio 1", name: "Updated", accountIds: ["account-1"] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/portfolios/portfolio%2F1", "DELETE", undefined],
+    ]);
+  });
+
+  test("proxies settings reads, app info, and auto-update setting reads", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      if (url.toString().endsWith("/app/info")) {
+        return Promise.resolve(jsonResponse({ version: "3.4.0" }));
+      }
+      return Promise.resolve(
+        jsonResponse(url.toString().endsWith("auto-update-enabled") ? true : {}),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_settings",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({});
+    await expect(
+      invokeSidecarCommand({
+        command: "get_app_info",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ version: "3.4.0" });
+    await expect(
+      invokeSidecarCommand({
+        command: "is_auto_update_check_enabled",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBe(true);
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/settings",
+      "http://127.0.0.1:18444/api/v1/app/info",
+      "http://127.0.0.1:18444/api/v1/settings/auto-update-enabled",
+    ]);
+  });
+
+  test("proxies update_settings with the settings update request body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ baseCurrency: "EUR" }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_settings",
+        payload: { settingsUpdate: { baseCurrency: "EUR" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ baseCurrency: "EUR" });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/settings");
+    expect(init?.method).toBe("PUT");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(init?.body).toBe(JSON.stringify({ baseCurrency: "EUR" }));
+  });
+
+  test("keeps updater commands out of the sidecar proxy", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "check_for_updates",
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("Electron update commands are handled by Electron main.");
+    await expect(
+      invokeSidecarCommand({
+        command: "install_app_update",
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("Electron update commands are handled by Electron main.");
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies web update-check alias through the sidecar", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ updateAvailable: false }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "check_update",
+        payload: {
+          currentVersion: "1.2.3",
+          target: "darwin",
+          arch: "arm64",
+          force: true,
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ updateAvailable: false });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe(
+      "http://127.0.0.1:18444/api/v1/app/check-update?currentVersion=1.2.3&target=darwin&arch=arm64&force=true",
+    );
+    expect(init?.method).toBe("GET");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("proxies database backup and restore utilities with Tauri-compatible shapes", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/backup")) {
+        return Promise.resolve(
+          jsonResponse({
+            filename: "wealthfolio_backup.db",
+            dataB64: Buffer.from([0, 1, 2, 255]).toString("base64"),
+          }),
+        );
+      }
+      if (path.endsWith("/backup-to-path")) {
+        return Promise.resolve(jsonResponse({ path: "/tmp/wealthfolio_backup.db" }));
+      }
+      if (path.endsWith("/backups") && init?.method === "GET") {
+        return Promise.resolve(
+          jsonResponse([
+            {
+              filename: "wealthfolio_backup_20260621_120000.db",
+              sizeBytes: 1234,
+              modifiedAt: "2026-06-21T04:00:00Z",
+            },
+          ]),
+        );
+      }
+      if (path.endsWith("/backups/wealthfolio_backup_20260621_120000.db")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      if (path.endsWith("/export/accounts/csv")) {
+        return Promise.resolve(
+          new Response(new Uint8Array([97, 44, 98]), {
+            headers: {
+              "content-disposition": 'attachment; filename="accounts_2026-06-17.csv"',
+            },
+          }),
+        );
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual(["wealthfolio_backup.db", [0, 1, 2, 255]]);
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database_to_path",
+        payload: { backupDir: "/tmp" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("/tmp/wealthfolio_backup.db");
+    await expect(
+      invokeSidecarCommand({
+        command: "list_database_backups",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([
+      {
+        filename: "wealthfolio_backup_20260621_120000.db",
+        sizeBytes: 1234,
+        modifiedAt: "2026-06-21T04:00:00Z",
+      },
+    ]);
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_database_backup",
+        payload: { filename: "wealthfolio_backup_20260621_120000.db" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "accounts", format: "CSV" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      status: "content",
+      filename: "accounts_2026-06-17.csv",
+      data: [97, 44, 98],
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_database",
+        payload: { backupFilePath: "/tmp/wealthfolio_backup.db" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/utilities/database/backup", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/backup-to-path",
+        "POST",
+        JSON.stringify({ backupDir: "/tmp" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/utilities/database/backups", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/backups/wealthfolio_backup_20260621_120000.db",
+        "DELETE",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/utilities/export/accounts/csv", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/utilities/database/restore",
+        "POST",
+        JSON.stringify({ backupFilePath: "/tmp/wealthfolio_backup.db" }),
+      ],
+    ]);
+  });
+
+  test("proxies export empty responses and fallback filenames", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/goals/json")) {
+        return Promise.resolve(new Response(new Uint8Array([123, 125])));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "goals", format: "JSON" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      status: "content",
+      filename: expect.stringMatching(/^goals_\d{4}-\d{2}-\d{2}\.json$/),
+      data: [123, 125],
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "export_data_file",
+        payload: { data: "activities", format: "JSON" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ status: "empty" });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/utilities/export/goals/json", "GET"],
+      ["http://127.0.0.1:18444/api/v1/utilities/export/activities/json", "GET"],
+    ]);
+  });
+
+  test("rejects malformed utility command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "backup_database_to_path",
+        payload: { backupDir: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "backupDir"');
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_database_backup",
+        payload: { filename: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "filename"');
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_database",
+        payload: { backupFilePath: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "backupFilePath"');
+    expect(called).toBe(false);
+  });
+
+  test("proxies secret commands without exposing sidecar credentials", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "GET"
+          ? jsonResponse("stored-secret")
+          : new Response(null, { status: 204 }),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "set_secret",
+        payload: { secretKey: "provider/key", secret: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "get_secret",
+        payload: { secretKey: "provider/key" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBe("stored-secret");
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_secret",
+        payload: { secretKey: "provider/key" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/secrets",
+        "POST",
+        JSON.stringify({ secretKey: "provider/key", secret: "" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/secrets?secretKey=provider%2Fkey", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/secrets?secretKey=provider%2Fkey", "DELETE", undefined],
+    ]);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed secret command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "set_secret",
+        payload: { secretKey: "provider" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "secret"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_secret",
+        payload: { secretKey: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "secretKey"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies sync crypto commands and preserves adapter return shapes", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/generate-keypair")) {
+        return Promise.resolve(jsonResponse({ publicKey: "pub", secretKey: "secret" }));
+      }
+      return Promise.resolve(jsonResponse({ value: `value:${path}` }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_root_key",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-root-key");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_dek",
+        payload: { rootKey: "root", version: 1 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/derive-dek");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_keypair",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ publicKey: "pub", secretKey: "secret" });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_shared_secret",
+        payload: { ourSecret: "ours", theirPublic: "theirs" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/compute-shared-secret");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_session_key",
+        payload: { sharedSecret: "shared", context: "ctx" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/derive-session-key");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_encrypt",
+        payload: { key: "key", plaintext: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/encrypt");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_decrypt",
+        payload: { key: "key", ciphertext: "cipher" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/decrypt");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_pairing_code",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-pairing-code");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hash_pairing_code",
+        payload: { code: "123456" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/hash-pairing-code");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hmac_sha256",
+        payload: { key: "key", data: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/hmac-sha256");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_sas",
+        payload: { sharedSecret: "shared" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/compute-sas");
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_generate_device_id",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBe("value:/api/v1/sync/crypto/generate-device-id");
+
+    expect(calls.map(([url]) => new URL(url.toString()).pathname)).toEqual([
+      "/api/v1/sync/crypto/generate-root-key",
+      "/api/v1/sync/crypto/derive-dek",
+      "/api/v1/sync/crypto/generate-keypair",
+      "/api/v1/sync/crypto/compute-shared-secret",
+      "/api/v1/sync/crypto/derive-session-key",
+      "/api/v1/sync/crypto/encrypt",
+      "/api/v1/sync/crypto/decrypt",
+      "/api/v1/sync/crypto/generate-pairing-code",
+      "/api/v1/sync/crypto/hash-pairing-code",
+      "/api/v1/sync/crypto/hmac-sha256",
+      "/api/v1/sync/crypto/compute-sas",
+      "/api/v1/sync/crypto/generate-device-id",
+    ]);
+    expect(calls[1]?.[1]?.body).toBe(JSON.stringify({ rootKey: "root", version: 1 }));
+    expect(calls[5]?.[1]?.body).toBe(JSON.stringify({ key: "key", plaintext: "" }));
+    expect(calls[9]?.[1]?.body).toBe(JSON.stringify({ key: "key", data: "" }));
+    expect(calls.every(([, init]) => init?.method === "POST")).toBe(true);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+    expect(calls[1]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed sync crypto payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_derive_dek",
+        payload: { rootKey: "root", version: 1.5 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires unsigned integer payload field "version"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_compute_shared_secret",
+        payload: { ourSecret: "ours" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "theirPublic"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_hash_pairing_code",
+        payload: { code: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "code"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies Connect session, broker sync, and local broker data commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path === "/api/v1/connect/session" && init?.method !== "GET") {
+        return Promise.resolve(jsonResponse(null));
+      }
+      if (path === "/api/v1/connect/session/restore") {
+        return Promise.resolve(jsonResponse({ accessToken: "access", refreshToken: "refresh" }));
+      }
+      if (path === "/api/v1/connect/session/status") {
+        return Promise.resolve(jsonResponse({ isConfigured: true }));
+      }
+      if (path === "/api/v1/connect/sync" && init?.method === "POST") {
+        return Promise.resolve(new Response(null, { status: 202 }));
+      }
+      if (path === "/api/v1/connect/sync/connections") {
+        return Promise.resolve(
+          jsonResponse({ synced: true, platformsCreated: 1, platformsUpdated: 2 }),
+        );
+      }
+      if (path === "/api/v1/connect/sync/accounts") {
+        return Promise.resolve(jsonResponse({ synced: true, created: 1, updated: 2, skipped: 0 }));
+      }
+      if (path === "/api/v1/connect/sync/activities") {
+        return Promise.resolve(
+          jsonResponse({
+            accountsSynced: 1,
+            activitiesUpserted: 2,
+            assetsInserted: 3,
+            accountsFailed: 0,
+          }),
+        );
+      }
+      if (path === "/api/v1/connect/broker-sync-profile") {
+        return Promise.resolve(jsonResponse({ accountId: "acct-1", rules: [] }));
+      }
+      return Promise.resolve(jsonResponse([{ path }]));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "store_sync_session",
+        payload: { refreshToken: "refresh-token" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_sync_session",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "get_sync_session_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ isConfigured: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "restore_sync_session",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accessToken: "access", refreshToken: "refresh" });
+    await expect(
+      invokeSidecarCommand({
+        command: "list_broker_connections",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/connections" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "list_broker_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/accounts" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_data",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "broker_ingest_run",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_connections",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ synced: true, platformsCreated: 1, platformsUpdated: 2 });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ synced: true, created: 1, updated: 2, skipped: 0 });
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_broker_activities",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({
+      accountsSynced: 1,
+      activitiesUpserted: 2,
+      assetsInserted: 3,
+      accountsFailed: 0,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "get_subscription_plans",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/plans" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_subscription_plans_public",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/plans/public" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_user_info",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/user" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_synced_accounts",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/synced-accounts" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_platforms",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/platforms" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_states",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/sync-states" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_ingest_states",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/sync-states" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_data_import_runs",
+        payload: { runType: "SYNC", limit: 5, offset: 10 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/import-runs" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_import_runs",
+        payload: { runType: "IMPORT", limit: 2 },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual([{ path: "/api/v1/connect/import-runs" }]);
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_profile",
+        payload: { accountId: "acct/1", sourceSystem: "ibkr" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accountId: "acct-1", rules: [] });
+    await expect(
+      invokeSidecarCommand({
+        command: "save_broker_sync_profile_rules",
+        payload: { request: { accountId: "acct-1", rules: [] } },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ accountId: "acct-1", rules: [] });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/connect/session",
+        "POST",
+        JSON.stringify({ refreshToken: "refresh-token" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/connect/session", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/session/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/session/restore", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/connections", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/accounts", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/connections", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/accounts", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync/activities", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/plans", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/plans/public", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/user", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/synced-accounts", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/platforms", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/sync-states", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=SYNC&limit=5&offset=10",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/import-runs?runType=IMPORT&limit=2",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/broker-sync-profile?accountId=acct%2F1&sourceSystem=ibkr",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/broker-sync-profile",
+        "POST",
+        JSON.stringify({ accountId: "acct-1", rules: [] }),
+      ],
+    ]);
+    expect(calls[0]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("rejects malformed Connect broker payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "store_sync_session",
+        payload: { refreshToken: "" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "refreshToken"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_data_import_runs",
+        payload: { limit: "5" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "limit"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_import_runs",
+        payload: { offset: "10" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "offset"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_broker_sync_profile",
+        payload: { accountId: "acct-1" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "sourceSystem"');
+    await expect(
+      invokeSidecarCommand({
+        command: "save_broker_sync_profile_rules",
+        payload: { request: null },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies device sync state and background engine commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      if (path.endsWith("/sync-data")) {
+        return Promise.resolve(jsonResponse(null));
+      }
+      return Promise.resolve(jsonResponse({ path, ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_device_sync_state",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/sync-state", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "enable_device_sync",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/enable", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_device_sync_data",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "reinitialize_device_sync",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/reinitialize", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_engine_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/engine-status", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_pairing_source_status",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/pairing-source-status", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_bootstrap_overwrite_check",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/bootstrap-overwrite-check", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        payload: { allowOverwrite: true },
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/reconcile-ready-state", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_bootstrap_snapshot_if_needed",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/bootstrap-snapshot", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_trigger_cycle",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/trigger-cycle", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_start_background_engine",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/start-background", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_stop_background_engine",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/stop-background", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_generate_snapshot_now",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/generate-snapshot", ok: true });
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_cancel_snapshot_upload",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ path: "/api/v1/connect/device/cancel-snapshot", ok: true });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/connect/device/sync-state", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/enable", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/sync-data", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/reinitialize", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/engine-status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/pairing-source-status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/bootstrap-overwrite-check", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/connect/device/reconcile-ready-state",
+        "POST",
+        JSON.stringify({ allowOverwrite: true }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/connect/device/bootstrap-snapshot", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/trigger-cycle", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/start-background", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/stop-background", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/generate-snapshot", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/connect/device/cancel-snapshot", "POST", undefined],
+    ]);
+    const headersWithoutBody = {
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    };
+    const headersWithBody = {
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    };
+    expect(calls.map(([, init], index) => init?.headers ?? `missing-${index}`)).toEqual([
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+      headersWithoutBody,
+    ]);
+  });
+
+  test("defaults and validates device sync reconcile payloads before fetch", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        sidecar,
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(calls[0]?.[1]?.body).toBe(JSON.stringify({ allowOverwrite: false }));
+
+    await expect(
+      invokeSidecarCommand({
+        command: "device_sync_reconcile_ready_state",
+        payload: { allowOverwrite: "yes" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "allowOverwrite"');
+    expect(calls).toHaveLength(1);
+  });
+
+  test("proxies device sync device management commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const parsed = new URL(url.toString());
+      return Promise.resolve(jsonResponse({ path: parsed.pathname, search: parsed.search }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "register_device",
+      payload: {
+        displayName: "Desktop",
+        platform: "macos",
+        instanceId: "instance-1",
+        osVersion: "14.0",
+        appVersion: "1.2.3",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({ command: "get_device", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "get_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_device",
+      payload: { deviceId: "" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_devices",
+      payload: { scope: "trusted" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_device",
+      payload: { deviceId: "device/1", displayName: "Desktop" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "revoke_device",
+      payload: { deviceId: "device/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({ command: "initialize_team_keys", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "commit_initialize_team_keys",
+      payload: {
+        keyVersion: 2,
+        deviceKeyEnvelope: "envelope",
+        signature: "signature",
+        challengeResponse: "challenge",
+        recoveryEnvelope: "recovery",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({ command: "rotate_team_keys", sidecar, fetchImpl });
+    await invokeSidecarCommand({
+      command: "commit_rotate_team_keys",
+      payload: {
+        newKeyVersion: 3,
+        envelopes: [{ deviceId: "device/1", deviceKeyEnvelope: "envelope-1" }],
+        signature: "signature",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "reset_team_sync",
+      payload: { reason: "rotate keys" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/sync/device/register",
+        "POST",
+        JSON.stringify({
+          displayName: "Desktop",
+          platform: "macos",
+          instanceId: "instance-1",
+          osVersion: "14.0",
+          appVersion: "1.2.3",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/current", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/devices?scope=trusted", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/device/device%2F1",
+        "PATCH",
+        JSON.stringify({ displayName: "Desktop" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "PATCH", JSON.stringify({})],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/device/device%2F1/revoke", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/keys/initialize", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/keys/initialize/commit",
+        "POST",
+        JSON.stringify({
+          keyVersion: 2,
+          deviceKeyEnvelope: "envelope",
+          signature: "signature",
+          challengeResponse: "challenge",
+          recoveryEnvelope: "recovery",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/keys/rotate", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/keys/rotate/commit",
+        "POST",
+        JSON.stringify({
+          newKeyVersion: 3,
+          envelopes: [{ deviceId: "device/1", deviceKeyEnvelope: "envelope-1" }],
+          signature: "signature",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/team/reset",
+        "POST",
+        JSON.stringify({ reason: "rotate keys" }),
+      ],
+    ]);
+    expect(calls[5]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(calls[6]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+    expect(calls[7]?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("proxies device sync pairing and pairing-flow commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const path = new URL(url.toString()).pathname;
+      return Promise.resolve(jsonResponse({ path, ok: true }));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "create_pairing",
+      payload: { codeHash: "hash", ephemeralPublicKey: "pub" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "approve_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "complete_pairing",
+      payload: {
+        pairingId: "pair/1",
+        encryptedKeyBundle: "bundle",
+        sasProof: { code: "123456" },
+        signature: "sig",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "cancel_pairing",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "claim_pairing",
+      payload: { code: "123456", ephemeralPublicKey: "pub" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing_messages",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "complete_pairing_with_transfer",
+      payload: {
+        pairingId: "pair/1",
+        encryptedKeyBundle: "bundle",
+        sasProof: "proof",
+        signature: "sig",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing_with_bootstrap",
+      payload: { pairingId: "pair/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "confirm_pairing_with_bootstrap",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        allowOverwrite: true,
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "begin_pairing_confirm",
+      payload: {
+        pairingId: "pair/1",
+        proof: "proof",
+        minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_pairing_flow_state",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "approve_pairing_overwrite",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "cancel_pairing_flow",
+      payload: { flowId: "flow/1" },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing",
+        "POST",
+        JSON.stringify({ codeHash: "hash", ephemeralPublicKey: "pub" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/approve", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/complete",
+        "POST",
+        JSON.stringify({
+          encryptedKeyBundle: "bundle",
+          sasProof: { code: "123456" },
+          signature: "sig",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/cancel", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/claim",
+        "POST",
+        JSON.stringify({ code: "123456", ephemeralPublicKey: "pub" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/messages", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/pair%2F1/confirm",
+        "POST",
+        JSON.stringify({
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/complete-with-transfer",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          encryptedKeyBundle: "bundle",
+          sasProof: "proof",
+          signature: "sig",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/confirm-with-bootstrap",
+        "POST",
+        JSON.stringify({ pairingId: "pair/1", allowOverwrite: false }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/confirm-with-bootstrap",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+          allowOverwrite: true,
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/begin",
+        "POST",
+        JSON.stringify({
+          pairingId: "pair/1",
+          proof: "proof",
+          minSnapshotCreatedAt: "2026-01-01T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/state",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/approve-overwrite",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/sync/pairing/flow/cancel",
+        "POST",
+        JSON.stringify({ flowId: "flow/1" }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed device sync device and pairing payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_device",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "deviceId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_pairing",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "pairingId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "complete_pairing",
+        payload: {
+          pairingId: "pair-1",
+          encryptedKeyBundle: "bundle",
+          sasProof: ["invalid"],
+          signature: "sig",
+        },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string or object payload field "sasProof"');
+    await expect(
+      invokeSidecarCommand({
+        command: "confirm_pairing",
+        payload: { pairingId: "pair-1" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "proof"');
+    await expect(
+      invokeSidecarCommand({
+        command: "confirm_pairing_with_bootstrap",
+        payload: { pairingId: "pair-1", allowOverwrite: "yes" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "allowOverwrite"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_pairing_flow_state",
+        payload: {},
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "flowId"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies portfolio update commands that return accepted with no body", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(new Response(null, { status: 202 }));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_portfolio",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "recalculate_portfolio",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/portfolio/update", "POST"],
+      ["http://127.0.0.1:18444/api/v1/portfolio/recalculate", "POST"],
+    ]);
+  });
+
+  test("proxies holdings read commands with encoded query parameters", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { accountId: "account 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holding",
+      payload: { accountId: "account 1", assetId: "asset/2" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_holdings",
+      payload: { assetId: "asset/2" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_lots",
+      payload: { assetId: "asset/2", includeSnapshotPositions: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/holdings?accountId=account+1",
+      "http://127.0.0.1:18444/api/v1/holdings/item?accountId=account+1&assetId=asset%2F2",
+      "http://127.0.0.1:18444/api/v1/holdings/by-asset?assetId=asset%2F2",
+      "http://127.0.0.1:18444/api/v1/holdings/lots?assetId=asset%2F2&includeSnapshotPositions=true",
+    ]);
+  });
+
+  test("proxies valuation and allocation read commands", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_historical_valuations",
+      payload: { accountId: "account-1", startDate: "2024-01-01", endDate: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_latest_valuations",
+      payload: { accountIds: ["account-1", "account 2"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_portfolio_allocations",
+      payload: { accountId: "account-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings_by_allocation",
+      payload: {
+        accountId: "account-1",
+        taxonomyId: "taxonomy-1",
+        categoryId: "category/1",
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/valuations/history?accountId=account-1&startDate=2024-01-01&endDate=2024-02-01",
+      "http://127.0.0.1:18444/api/v1/valuations/latest?accountIds%5B%5D=account-1&accountIds%5B%5D=account+2",
+      "http://127.0.0.1:18444/api/v1/allocations?accountId=account-1",
+      "http://127.0.0.1:18444/api/v1/allocations/holdings?accountId=account-1&taxonomyId=taxonomy-1&categoryId=category%2F1",
+    ]);
+  });
+
+  test("routes scope-based holdings, allocations, and income queries", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse([]));
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { filter: { type: "all" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings",
+      payload: { filter: { type: "account", accountId: "account-1" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_portfolio_allocations",
+      payload: { filter: { type: "portfolio", portfolioId: "portfolio-1" } },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_holdings_by_allocation",
+      payload: {
+        filter: { type: "accounts", accountIds: ["account-1", "account 2"] },
+        taxonomyId: "taxonomy-1",
+        categoryId: "category/1",
+      },
+      sidecar,
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      payload: { filter: { type: "all" } },
+      sidecar,
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/holdings/query",
+        "POST",
+        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/holdings?accountId=account-1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/allocations/query",
+        "POST",
+        JSON.stringify({ filter: { type: "Portfolio", portfolioId: "portfolio-1" } }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/allocations/holdings/query",
+        "POST",
+        JSON.stringify({
+          filter: { type: "Accounts", accountIds: ["account-1", "account 2"] },
+          taxonomyId: "taxonomy-1",
+          categoryId: "category/1",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/income/summary/query",
+        "POST",
+        JSON.stringify({ filter: { type: "TotalSnapshot" } }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed scope filters before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+    const sidecar = { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_holdings",
+        payload: { filter: "all" },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Electron command "get_holdings" requires object payload field "filter".');
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_holdings_by_allocation",
+        payload: {
+          filter: { type: "accounts", accountIds: ["account-1", 2] },
+          taxonomyId: "taxonomy-1",
+          categoryId: "category-1",
+        },
+        sidecar,
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "get_holdings_by_allocation" requires string array payload field "filter.accountIds".',
+    );
+  });
+
+  test("proxies performance commands with JSON request bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "calculate_accounts_simple_performance",
+      payload: { accountIds: ["account-1"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "calculate_performance_history",
+      payload: { itemType: "ACCOUNT", itemId: "account-1", startDate: "2024-01-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "calculate_performance_summary",
+      payload: { itemType: "ACCOUNT", itemId: "account-1", endDate: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/performance/accounts/simple",
+        "POST",
+        JSON.stringify({ accountIds: ["account-1"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/performance/history",
+        "POST",
+        JSON.stringify({ itemType: "ACCOUNT", itemId: "account-1", startDate: "2024-01-01" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/performance/summary",
+        "POST",
+        JSON.stringify({ itemType: "ACCOUNT", itemId: "account-1", endDate: "2024-02-01" }),
+      ],
+    ]);
+    for (const [, init] of calls) {
+      expect(init?.headers).toEqual({
+        Accept: "application/json",
+        Authorization: "Bearer sidecar-token",
+        "Content-Type": "application/json",
+      });
+    }
+  });
+
+  test("proxies income summary with optional account filtering", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse([]));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      payload: { accountId: "account-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_income_summary",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/income/summary?accountId=account-1",
+      "http://127.0.0.1:18444/api/v1/income/summary",
+    ]);
+  });
+
+  test("proxies snapshot reads and deletes with query parameters", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" ? new Response(null, { status: 204 }) : jsonResponse([]),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_snapshots",
+      payload: { accountId: "account 1", dateFrom: "2024-01-01", dateTo: "2024-02-01" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_snapshot_by_date",
+      payload: { accountId: "account 1", date: "2024-01-15" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_snapshot",
+        payload: { accountId: "account 1", date: "2024-01-15" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots?accountId=account+1&dateFrom=2024-01-01&dateTo=2024-02-01",
+        "GET",
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/holdings?accountId=account+1&date=2024-01-15",
+        "GET",
+      ],
+      ["http://127.0.0.1:18444/api/v1/snapshots?accountId=account+1&date=2024-01-15", "DELETE"],
+    ]);
+  });
+
+  test("proxies manual holdings and CSV snapshot import bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        url.toString().endsWith("/snapshots")
+          ? new Response(null, { status: 200 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_manual_holdings",
+        payload: {
+          accountId: "account-1",
+          holdings: [{ symbol: "AAPL" }],
+          cashBalances: { USD: "100" },
+          snapshotDate: "2024-01-15",
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "check_holdings_import",
+      payload: { accountId: "account-1", snapshots: [{ date: "2024-01-15" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_holdings_csv",
+      payload: { accountId: "account-1", snapshots: [{ date: "2024-01-15" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots",
+        "POST",
+        JSON.stringify({
+          accountId: "account-1",
+          holdings: [{ symbol: "AAPL" }],
+          cashBalances: { USD: "100" },
+          snapshotDate: "2024-01-15",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/import/check",
+        "POST",
+        JSON.stringify({ accountId: "account-1", snapshots: [{ date: "2024-01-15" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/snapshots/import",
+        "POST",
+        JSON.stringify({ accountId: "account-1", snapshots: [{ date: "2024-01-15" }] }),
+      ],
+    ]);
+    for (const [, init] of calls) {
+      expect(init?.headers).toEqual({
+        Accept: "application/json",
+        Authorization: "Bearer sidecar-token",
+        "Content-Type": "application/json",
+      });
+    }
+  });
+
+  test("rejects malformed snapshot command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_manual_holdings",
+        payload: { accountId: "account-1", holdings: {}, cashBalances: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "save_manual_holdings" requires array payload field "holdings".',
+    );
+  });
+
+  test("proxies core activity commands with JSON bodies and encoded ids", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "search_activities",
+      payload: { page: 1, pageSize: 25 },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_activity",
+      payload: { activity: { accountId: "acct-1", activityType: "BUY" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_activity",
+      payload: { activity: { id: "activity/1", activityType: "SELL" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_activities",
+      payload: { request: { create: [{ activityType: "DIVIDEND" }] } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_activity",
+      payload: { activityId: "activity/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "link_transfer_activities",
+      payload: { activityAId: "a-1", activityBId: "b-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "unlink_transfer_activities",
+      payload: { activityAId: "a-1", activityBId: "b-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/activities/search",
+        "POST",
+        JSON.stringify({ page: 1, pageSize: 25 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities",
+        "POST",
+        JSON.stringify({ accountId: "acct-1", activityType: "BUY" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities",
+        "PUT",
+        JSON.stringify({ id: "activity/1", activityType: "SELL" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/bulk",
+        "POST",
+        JSON.stringify({ create: [{ activityType: "DIVIDEND" }] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/activities/activity%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/link",
+        "POST",
+        JSON.stringify({ activityAId: "a-1", activityBId: "b-1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/unlink",
+        "POST",
+        JSON.stringify({ activityAId: "a-1", activityBId: "b-1" }),
+      ],
+    ]);
+  });
+
+  test("proxies activity import and template commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "check_activities_import",
+      payload: { activities: [{ id: "import-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "preview_import_assets",
+      payload: { candidates: [{ symbol: "AAPL" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_activities",
+      payload: { activities: [{ id: "import-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_account_import_mapping",
+      payload: { accountId: "account 1", contextKind: "activity" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_account_import_mapping",
+      payload: { mapping: { accountId: "account 1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_import_templates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_import_template",
+      payload: { id: "template/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_import_template",
+      payload: { template: { id: "template/1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_import_template",
+      payload: { id: "template/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "link_account_template",
+      payload: { accountId: "account 1", templateId: "template/1", contextKind: "activity" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/check",
+        "POST",
+        JSON.stringify({ activities: [{ id: "import-1" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/assets/preview",
+        "POST",
+        JSON.stringify({ candidates: [{ symbol: "AAPL" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import",
+        "POST",
+        JSON.stringify({ activities: [{ id: "import-1" }] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/mapping?accountId=account+1&contextKind=activity",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/mapping",
+        "POST",
+        JSON.stringify({ mapping: { accountId: "account 1" } }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/activities/import/templates", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates/item?id=template%2F1",
+        "GET",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates",
+        "POST",
+        JSON.stringify({ template: { id: "template/1" } }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates?id=template%2F1",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/activities/import/templates/link",
+        "POST",
+        JSON.stringify({
+          accountId: "account 1",
+          templateId: "template/1",
+          contextKind: "activity",
+        }),
+      ],
+    ]);
+  });
+
+  test("proxies CSV parsing as authenticated multipart without JSON content type", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ headers: ["日期", "Amount"], rows: [] }));
+    };
+    const config = {
+      delimiter: ";",
+      mappings: { date: "日期", amount: "Amount" },
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [0, 1, 2, 255], config },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ headers: ["日期", "Amount"], rows: [] });
+
+    const [url, init] = calls[0];
+    expect(url.toString()).toBe("http://127.0.0.1:18444/api/v1/activities/import/parse");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+    expect(init?.body).toBeInstanceOf(FormData);
+    const form = init?.body as FormData;
+    const file = form.get("file");
+    const configPart = form.get("config");
+    expect(file).toBeInstanceOf(Blob);
+    expect(configPart).toBeInstanceOf(Blob);
+    expect(Array.from(new Uint8Array(await (file as Blob).arrayBuffer()))).toEqual([0, 1, 2, 255]);
+    expect(await (configPart as Blob).text()).toBe(JSON.stringify(config));
+  });
+
+  test("rejects malformed activity command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "create_activity",
+        payload: { activity: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "create_activity" requires object payload field "activity".',
+    );
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [256], config: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "content"');
+    await expect(
+      invokeSidecarCommand({
+        command: "parse_csv",
+        payload: { content: [], config: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "config"');
+  });
+
+  test("proxies exchange rate commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_latest_exchange_rates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_exchange_rate",
+      payload: {
+        rate: {
+          id: "fx-1",
+          fromCurrency: "USD",
+          toCurrency: "CAD",
+          rate: "1.4",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "add_exchange_rate",
+      payload: {
+        newRate: {
+          fromCurrency: "EUR",
+          toCurrency: "CAD",
+          rate: "1.5",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_exchange_rate",
+        payload: { rateId: "USD/CAD" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/exchange-rates/latest", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/exchange-rates",
+        "PUT",
+        JSON.stringify({
+          id: "fx-1",
+          fromCurrency: "USD",
+          toCurrency: "CAD",
+          rate: "1.4",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/exchange-rates",
+        "POST",
+        JSON.stringify({
+          fromCurrency: "EUR",
+          toCurrency: "CAD",
+          rate: "1.5",
+          source: "MANUAL",
+          timestamp: "2024-01-15T00:00:00Z",
+        }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/exchange-rates/USD%2FCAD", "DELETE", undefined],
+    ]);
+  });
+
+  test("proxies market data provider and custom provider commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 200 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_exchanges",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_market_data_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_market_data_providers_settings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_market_data_provider_settings",
+      payload: { providerId: "yahoo", priority: 1, enabled: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_custom_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_custom_provider",
+      payload: { payload: { name: "Custom" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_custom_provider",
+      payload: { providerId: "provider/1", payload: { name: "Updated" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_custom_provider",
+        payload: { providerId: "provider/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "test_custom_provider_source",
+      payload: { payload: { providerId: "provider/1", sourceId: "source-1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/exchanges", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/providers", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/providers/settings", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/providers/settings",
+        "PUT",
+        JSON.stringify({ providerId: "yahoo", priority: 1, enabled: true }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/custom-providers", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers",
+        "POST",
+        JSON.stringify({ name: "Custom" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers/provider%2F1",
+        "PUT",
+        JSON.stringify({ name: "Updated" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/custom-providers/provider%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/custom-providers/test-source",
+        "POST",
+        JSON.stringify({ providerId: "provider/1", sourceId: "source-1" }),
+      ],
+    ]);
+  });
+
+  test("proxies contribution limit commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_contribution_limits",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_contribution_limit",
+      payload: { newLimit: { groupName: "RRSP", limitAmount: "1000" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_contribution_limit",
+      payload: { id: "limit/1", updatedLimit: { groupName: "TFSA", limitAmount: "2000" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_contribution_limit",
+        payload: { id: "limit/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "calculate_deposits_for_contribution_limit",
+      payload: { limitId: "limit/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/limits", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/limits",
+        "POST",
+        JSON.stringify({ groupName: "RRSP", limitAmount: "1000" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/limits/limit%2F1",
+        "PUT",
+        JSON.stringify({ groupName: "TFSA", limitAmount: "2000" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/limits/limit%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/limits/limit%2F1/deposits", "GET", undefined],
+    ]);
+  });
+
+  test("proxies asset profile commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_assets",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_asset",
+      payload: { payload: { symbol: "AAPL", name: "Apple Inc." } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_profile",
+      payload: { assetId: "asset/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_asset_profile",
+      payload: { id: "asset/1", payload: { name: "Apple" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_quote_mode",
+      payload: { id: "asset/1", quoteMode: "manual" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_asset",
+        payload: { id: "asset/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/assets", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/assets",
+        "POST",
+        JSON.stringify({ symbol: "AAPL", name: "Apple Inc." }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/assets/profile?assetId=asset%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/assets/profile/asset%2F1",
+        "PUT",
+        JSON.stringify({ name: "Apple" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/assets/pricing-mode/asset%2F1",
+        "PUT",
+        JSON.stringify({ quoteMode: "manual" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/assets/asset%2F1", "DELETE", undefined],
+    ]);
+  });
+
+  test("proxies market data quote commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" || url.toString().endsWith("/market-data/sync/history")
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "search_symbol",
+      payload: { query: "AAPL US" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "resolve_symbol_quote",
+      payload: {
+        symbol: "SHOP",
+        exchangeMic: "XTSE",
+        instrumentType: "equity",
+        providerId: "yahoo",
+        quoteCcy: "CAD",
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_quote_history",
+      payload: { symbol: "BRK.B" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "fetch_yahoo_dividends",
+      payload: { symbol: "AAPL" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_latest_quotes",
+      payload: { assetIds: ["asset/1", "asset-2"] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_quote",
+      payload: { symbol: "asset/1", quote: { close: 123.45 } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_quote",
+        payload: { id: "quote/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "check_quotes_import",
+      payload: { content: [115, 121, 109], hasHeaderRow: true },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_quotes_csv",
+      payload: { quotes: [{ symbol: "AAPL" }], overwriteExisting: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "synch_quotes",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "sync_market_data",
+      payload: { assetIds: ["asset/1"], refetchAll: false, refetchRecentDays: 30 },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/market-data/search?query=AAPL+US", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/resolve-currency?symbol=SHOP&exchangeMic=XTSE&instrumentType=equity&providerId=yahoo&quoteCcy=CAD",
+        "GET",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/quotes/history?symbol=BRK.B", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/market-data/yahoo/dividends?symbol=AAPL", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/latest",
+        "POST",
+        JSON.stringify({ assetIds: ["asset/1", "asset-2"] }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/asset%2F1",
+        "PUT",
+        JSON.stringify({ close: 123.45 }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/quotes/id/quote%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/check",
+        "POST",
+        JSON.stringify({ content: [115, 121, 109], hasHeaderRow: true }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/quotes/import",
+        "POST",
+        JSON.stringify({ quotes: [{ symbol: "AAPL" }], overwriteExisting: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/market-data/sync/history", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/market-data/sync",
+        "POST",
+        JSON.stringify({ assetIds: ["asset/1"], refetchAll: false, refetchRecentDays: 30 }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed asset and quote command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_quote_mode",
+        payload: { id: "asset-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "quoteMode"');
+    await expect(
+      invokeSidecarCommand({
+        command: "get_latest_quotes",
+        payload: { assetIds: ["asset-1", 1] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string array payload field "assetIds"');
+    await expect(
+      invokeSidecarCommand({
+        command: "sync_market_data",
+        payload: { assetIds: ["asset-1"] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "refetchAll"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies taxonomy commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_taxonomies",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_taxonomy",
+      payload: { id: "taxonomy/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_taxonomy",
+      payload: { taxonomy: { name: "Asset Class" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_taxonomy",
+      payload: { taxonomy: { id: "taxonomy/1", name: "Sector" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_taxonomy",
+        payload: { id: "taxonomy/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "create_category",
+      payload: { category: { taxonomyId: "taxonomy/1", name: "Equity" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_category",
+      payload: { category: { id: "category/1", name: "Stocks" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_category",
+        payload: { taxonomyId: "taxonomy/1", categoryId: "category/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "move_category",
+      payload: {
+        taxonomyId: "taxonomy/1",
+        categoryId: "category/1",
+        newParentId: null,
+        position: 2,
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "import_taxonomy_json",
+      payload: { jsonStr: '{"name":"Imported"}' },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "export_taxonomy_json",
+      payload: { id: "taxonomy/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_asset_taxonomy_assignments",
+      payload: { assetId: "asset/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "assign_asset_to_category",
+      payload: { assignment: { assetId: "asset/1", categoryId: "category/1" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "remove_asset_taxonomy_assignment",
+        payload: { id: "assignment/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_migration_status",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "migrate_legacy_classifications",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/taxonomies", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies", "POST", JSON.stringify({ name: "Asset Class" })],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies",
+        "PUT",
+        JSON.stringify({ id: "taxonomy/1", name: "Sector" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories",
+        "POST",
+        JSON.stringify({ taxonomyId: "taxonomy/1", name: "Equity" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories",
+        "PUT",
+        JSON.stringify({ id: "category/1", name: "Stocks" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1/categories/category%2F1",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/categories/move",
+        "POST",
+        JSON.stringify({
+          taxonomyId: "taxonomy/1",
+          categoryId: "category/1",
+          newParentId: null,
+          position: 2,
+        }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/import",
+        "POST",
+        JSON.stringify({ jsonStr: '{"name":"Imported"}' }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/taxonomy%2F1/export", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/assignments/asset/asset%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/taxonomies/assignments",
+        "POST",
+        JSON.stringify({ assetId: "asset/1", categoryId: "category/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/assignments/assignment%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/migration/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/taxonomies/migration/run", "POST", undefined],
+    ]);
+  });
+
+  test("rejects malformed taxonomy command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_category",
+        payload: { taxonomyId: "taxonomy-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "categoryId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "move_category",
+        payload: { taxonomyId: "taxonomy-1", categoryId: "category-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "position"');
+    await expect(
+      invokeSidecarCommand({
+        command: "import_taxonomy_json",
+        payload: { jsonStr: "" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "jsonStr"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies health center commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_health_status",
+      payload: { clientTimezone: "America/Toronto" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "run_health_checks",
+      payload: { clientTimezone: "America/Vancouver" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "dismiss_health_issue",
+      payload: { issueId: "issue/1", dataHash: "hash/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "restore_health_issue",
+      payload: { issueId: "issue/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_dismissed_health_issues",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "execute_health_fix",
+      payload: { action: { id: "sync_prices", payload: ["asset-1"] } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_health_config",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_health_config",
+      payload: { config: { enabled: true } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/health/status", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/health/check", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/health/dismiss",
+        "POST",
+        JSON.stringify({ issueId: "issue/1", dataHash: "hash/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/health/restore",
+        "POST",
+        JSON.stringify({ issueId: "issue/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/health/dismissed", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/health/fix",
+        "POST",
+        JSON.stringify({ id: "sync_prices", payload: ["asset-1"] }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/health/config", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/health/config", "PUT", JSON.stringify({ enabled: true })],
+    ]);
+    expect(calls[0]?.[1]?.headers).toMatchObject({
+      "X-Client-Timezone": "America/Toronto",
+    });
+    expect(calls[1]?.[1]?.headers).toMatchObject({
+      "X-Client-Timezone": "America/Vancouver",
+    });
+    expect(calls[1]?.[1]?.headers).not.toHaveProperty("Content-Type");
+  });
+
+  test("rejects malformed health command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "dismiss_health_issue",
+        payload: { issueId: "issue-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "dataHash"');
+    await expect(
+      invokeSidecarCommand({
+        command: "execute_health_fix",
+        payload: { action: "sync_prices" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "action"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_health_config",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "config"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies add-on commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "list_installed_addons",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "install_addon_zip",
+      payload: { zipData: [80, 75, 3, 4] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "toggle_addon",
+      payload: { addonId: "addon/1", enabled: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "uninstall_addon",
+        payload: { addonId: "addon/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "load_addon_for_runtime",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_enabled_addons_on_startup",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "extract_addon_zip",
+      payload: { zipData: [1, 2, 255] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "fetch_addon_store_listings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "submit_addon_rating",
+      payload: { addonId: "addon/1", rating: 5, review: "Great" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_addon_ratings",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "check_addon_update",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "check_all_addon_updates",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_addon_from_store_by_id",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "download_addon_to_staging",
+      payload: { addonId: "addon/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "install_addon_from_staging",
+      payload: { addonId: "addon/1", enableAfterInstall: false },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        payload: { addonId: "addon/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/addons/installed", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/install-zip",
+        "POST",
+        JSON.stringify({ zipDataB64: "UEsDBA==" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/toggle",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", enabled: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/addon%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/runtime/addon%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/enabled-on-startup", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/extract",
+        "POST",
+        JSON.stringify({ zipDataB64: "AQL/" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/listings", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/ratings",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", rating: 5, review: "Great" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/ratings?addonId=addon%2F1", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/check-update",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/check-all", "POST", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/update",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/staging/download",
+        "POST",
+        JSON.stringify({ addonId: "addon/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/addons/store/install-from-staging",
+        "POST",
+        JSON.stringify({ addonId: "addon/1", enableAfterInstall: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/addons/store/staging?addonId=addon%2F1", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/addons/store/staging", "DELETE", undefined],
+    ]);
+
+    const checkAllCall = calls.find(([url]) => url.toString().endsWith("/addons/store/check-all"));
+    expect(checkAllCall?.[1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+    });
+  });
+
+  test("rejects malformed add-on command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "extract_addon_zip",
+        payload: { zipData: [1.5] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [256] },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires byte array payload field "zipData"');
+    await expect(
+      invokeSidecarCommand({
+        command: "install_addon_zip",
+        payload: { zipData: [80], enableAfterInstall: "true" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "enableAfterInstall"');
+    await expect(
+      invokeSidecarCommand({
+        command: "toggle_addon",
+        payload: { addonId: "addon-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires boolean payload field "enabled"');
+    await expect(
+      invokeSidecarCommand({
+        command: "uninstall_addon",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "addonId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "submit_addon_rating",
+        payload: { addonId: "addon-1", rating: 6 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires integer rating payload field "rating" between 1 and 5');
+    await expect(
+      invokeSidecarCommand({
+        command: "clear_addon_staging",
+        payload: { addonId: 1 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "addonId"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies net worth commands", async () => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (url) => {
+      urls.push(url.toString());
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_net_worth",
+      payload: { date: "2025-01-31" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_net_worth",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_net_worth_history",
+      payload: { startDate: "2025-01-01", endDate: "2025-01-31" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(urls).toEqual([
+      "http://127.0.0.1:18444/api/v1/net-worth?date=2025-01-31",
+      "http://127.0.0.1:18444/api/v1/net-worth",
+      "http://127.0.0.1:18444/api/v1/net-worth/history?startDate=2025-01-01&endDate=2025-01-31",
+    ]);
+  });
+
+  test("rejects malformed net worth command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_net_worth_history",
+        payload: { startDate: "2025-01-01" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "endDate"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies AI provider commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_ai_providers",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_ai_provider_settings",
+      payload: { request: { providerId: "openai", selectedModel: "gpt-5.4" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "set_default_ai_provider",
+      payload: { request: {} },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "list_ai_models",
+      payload: { providerId: "provider/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/ai/providers", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/providers/settings",
+        "PUT",
+        JSON.stringify({ providerId: "openai", selectedModel: "gpt-5.4" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/providers/default", "POST", JSON.stringify({})],
+      ["http://127.0.0.1:18444/api/v1/ai/providers/provider%2F1/models", "GET", undefined],
+    ]);
+  });
+
+  test("proxies AI thread commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE" || (init?.method === "POST" && url.toString().includes("/tags"))
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "list_ai_threads",
+      payload: { cursor: "cursor/1", limit: 50, search: "tax lot" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_ai_thread",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_ai_thread_messages",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_ai_thread",
+      payload: { request: { id: "thread/1", title: "Plan", isPinned: false } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_ai_thread",
+        payload: { threadId: "thread/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "add_ai_thread_tag",
+        payload: { threadId: "thread/1", tag: "needs review" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "remove_ai_thread_tag",
+        payload: { threadId: "thread/1", tag: "needs/review #one" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_ai_thread_tags",
+      payload: { threadId: "thread/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_tool_result",
+      payload: {
+        request: {
+          threadId: "thread/1",
+          toolCallId: "tool/1",
+          resultPatch: { submitted: true },
+        },
+      },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads?cursor=cursor%2F1&limit=50&search=tax+lot",
+        "GET",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/messages", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1",
+        "PUT",
+        JSON.stringify({ title: "Plan", isPinned: false }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags",
+        "POST",
+        JSON.stringify({ tag: "needs review" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags/needs%2Freview%20%23one",
+        "DELETE",
+        undefined,
+      ],
+      ["http://127.0.0.1:18444/api/v1/ai/threads/thread%2F1/tags", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/ai/tool-result",
+        "PATCH",
+        JSON.stringify({
+          threadId: "thread/1",
+          toolCallId: "tool/1",
+          resultPatch: { submitted: true },
+        }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed AI command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_ai_provider_settings",
+        payload: { request: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "request.providerId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "list_ai_models",
+        payload: {},
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "providerId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "list_ai_threads",
+        payload: { limit: "50" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires number payload field "limit"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_ai_thread",
+        payload: { request: { title: "Missing ID" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "request.id"');
+    await expect(
+      invokeSidecarCommand({
+        command: "add_ai_thread_tag",
+        payload: { threadId: "thread-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "tag"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_tool_result",
+        payload: { request: { threadId: "thread-1", toolCallId: "tool-1", resultPatch: [] } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request.resultPatch"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies alternative asset commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      const urlString = url.toString();
+      return Promise.resolve(
+        init?.method === "DELETE" ||
+          urlString.includes("/link-liability") ||
+          urlString.includes("/metadata")
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "create_alternative_asset",
+      payload: { request: { kind: "property", name: "House", currency: "CAD" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_alternative_asset_valuation",
+      payload: { assetId: "asset/1", request: { value: "1000", date: "2025-01-31" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_alternative_asset",
+        payload: { assetId: "asset/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "link_liability",
+        payload: { liabilityId: "liability/1", request: { targetAssetId: "asset/1" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "unlink_liability",
+        payload: { liabilityId: "liability/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_metadata",
+        payload: {
+          assetId: "asset/1",
+          metadata: { vin: "123" },
+          name: "Updated House",
+          notes: null,
+        },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    await invokeSidecarCommand({
+      command: "get_alternative_holdings",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets",
+        "POST",
+        JSON.stringify({ kind: "property", name: "House", currency: "CAD" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1/valuation",
+        "PUT",
+        JSON.stringify({ value: "1000", date: "2025-01-31" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1", "DELETE", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/liability%2F1/link-liability",
+        "POST",
+        JSON.stringify({ targetAssetId: "asset/1" }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/liability%2F1/link-liability",
+        "DELETE",
+        undefined,
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/alternative-assets/asset%2F1/metadata",
+        "PUT",
+        JSON.stringify({ metadata: { vin: "123" }, name: "Updated House", notes: null }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/alternative-holdings", "GET", undefined],
+    ]);
+  });
+
+  test("rejects malformed alternative asset command payloads before fetch", async () => {
+    let called = false;
+    const fetchImpl: FetchLike = () => {
+      called = true;
+      return Promise.resolve(jsonResponse({}));
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_valuation",
+        payload: { assetId: "asset-1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires object payload field "request"');
+    await expect(
+      invokeSidecarCommand({
+        command: "link_liability",
+        payload: { request: { targetAssetId: "asset-1" } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string payload field "liabilityId"');
+    await expect(
+      invokeSidecarCommand({
+        command: "update_alternative_asset_metadata",
+        payload: { assetId: "asset-1", metadata: { year: 2025 } },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('requires string record payload field "metadata"');
+
+    expect(called).toBe(false);
+  });
+
+  test("proxies goal CRUD commands with encoded goal ids and JSON bodies", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_goals",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_goal",
+      payload: { goalId: "goal/1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "create_goal",
+      payload: { goal: { name: "Retire" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "update_goal",
+      payload: { goal: { id: "goal/1", name: "Retire early" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await expect(
+      invokeSidecarCommand({
+        command: "delete_goal",
+        payload: { goalId: "goal/1" },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%2F1", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals", "POST", JSON.stringify({ name: "Retire" })],
+      [
+        "http://127.0.0.1:18444/api/v1/goals",
+        "PUT",
+        JSON.stringify({ id: "goal/1", name: "Retire early" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%2F1", "DELETE", undefined],
+    ]);
+    expect(calls[2][1]?.headers).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer sidecar-token",
+      "Content-Type": "application/json",
+    });
+  });
+
+  test("proxies goal funding, plan, and refresh commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(
+        init?.method === "DELETE"
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ ok: true }),
+      );
+    };
+
+    await invokeSidecarCommand({
+      command: "get_goal_funding",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_goal_funding",
+      payload: { goalId: "goal 1", rules: [{ accountId: "acct-1" }] },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_goal_plan",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "save_goal_plan",
+      payload: { plan: { goalId: "goal 1", planKind: "retirement" } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "delete_goal_plan",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "refresh_goal_summary",
+      payload: { goalId: "goal 1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "refresh_all_goal_summaries",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/funding", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/goal%201/funding",
+        "PUT",
+        JSON.stringify([{ accountId: "acct-1" }]),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/plan", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/plan",
+        "POST",
+        JSON.stringify({ goalId: "goal 1", planKind: "retirement" }),
+      ],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/plan", "DELETE", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal%201/refresh-summary", "POST", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/refresh-summaries", "POST", undefined],
+    ]);
+  });
+
+  test("proxies retirement overview and simulation commands", async () => {
+    const calls: Array<[URL | RequestInfo, RequestInit | undefined]> = [];
+    const fetchImpl: FetchLike = (url, init) => {
+      calls.push([url, init]);
+      return Promise.resolve(jsonResponse({ ok: true }));
+    };
+
+    await invokeSidecarCommand({
+      command: "get_retirement_overview",
+      payload: { goalId: "goal-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "get_save_up_overview",
+      payload: { goalId: "goal-1" },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    await invokeSidecarCommand({
+      command: "preview_save_up_overview",
+      payload: { input: { targetAmount: 1000 } },
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    });
+    for (const command of [
+      "calculate_retirement_projection",
+      "run_retirement_monte_carlo",
+      "run_retirement_stress_tests",
+      "run_retirement_scenario_analysis",
+      "run_retirement_decision_sensitivity_map",
+      "run_retirement_sorr",
+    ] satisfies ElectronCommand[]) {
+      await invokeSidecarCommand({
+        command,
+        payload: { goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      });
+    }
+
+    expect(calls.map(([url, init]) => [url.toString(), init?.method, init?.body])).toEqual([
+      ["http://127.0.0.1:18444/api/v1/goals/goal-1/retirement/overview", "GET", undefined],
+      ["http://127.0.0.1:18444/api/v1/goals/goal-1/save-up/overview", "GET", undefined],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/save-up/preview",
+        "POST",
+        JSON.stringify({ targetAmount: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/projection",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/monte-carlo",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/stress-tests",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/scenario-analysis",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/decision-sensitivity-map",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+      [
+        "http://127.0.0.1:18444/api/v1/goals/retirement/sequence-of-returns",
+        "POST",
+        JSON.stringify({ goalId: "goal-1", plan: { age: 40 }, currentPortfolio: 1000 }),
+      ],
+    ]);
+  });
+
+  test("rejects malformed goal command payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "save_goal_funding",
+        payload: { goalId: "goal-1", rules: {} },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow('Electron command "save_goal_funding" requires array payload field "rules".');
+  });
+
+  test("rejects malformed settings update payloads before fetch", async () => {
+    const fetchImpl: FetchLike = () => {
+      throw new Error("fetch should not be called");
+    };
+
+    await expect(
+      invokeSidecarCommand({
+        command: "update_settings",
+        payload: { settingsUpdate: null as unknown as Record<string, unknown> },
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron command "update_settings" requires object payload field "settingsUpdate".',
+    );
+  });
+
+  test("does not leak sidecar URL or token in command errors", async () => {
+    const fetchImpl: FetchLike = () =>
+      Promise.resolve(
+        jsonResponse(
+          {
+            message:
+              "Connection failed to http://127.0.0.1:18444 with token=sidecar-token and sidecar-token",
+          },
+          { status: 401, statusText: "Unauthorized" },
+        ),
+      );
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_accounts",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron sidecar command "get_accounts" failed with HTTP 401: Connection failed to [sidecar] with token=[redacted] and [redacted]',
+    );
+
+    await invokeSidecarCommand({
+      command: "get_accounts",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).not.toContain("127.0.0.1");
+      expect(message).not.toContain("sidecar-token");
+    });
+  });
+
+  test("sanitizes network errors before they cross the IPC boundary", async () => {
+    const fetchImpl: FetchLike = () =>
+      Promise.reject(new Error("connect ECONNREFUSED http://127.0.0.1:18444 token=sidecar-token"));
+
+    await invokeSidecarCommand({
+      command: "get_accounts",
+      sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      fetchImpl,
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      expect(message).toContain("connect ECONNREFUSED [sidecar] token=[redacted]");
+      expect(message).not.toContain("127.0.0.1");
+      expect(message).not.toContain("sidecar-token");
+    });
+  });
+
+  test("fails closed if an allowlisted command has no proxy implementation", async () => {
+    await expect(
+      invokeSidecarCommand({
+        command: "missing_command" as ElectronCommand,
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "sidecar-token" },
+      }),
+    ).rejects.toThrow(
+      'Electron command "missing_command" passed validation but has no implementation.',
+    );
+  });
+
+  test("does not corrupt sanitized errors when a malformed sidecar has no token", async () => {
+    const fetchImpl: FetchLike = () =>
+      Promise.resolve(
+        jsonResponse(
+          { message: "Connection failed to http://127.0.0.1:18444" },
+          { status: 500, statusText: "Internal Server Error" },
+        ),
+      );
+
+    await expect(
+      invokeSidecarCommand({
+        command: "get_accounts",
+        sidecar: { baseUrl: "http://127.0.0.1:18444", token: "" },
+        fetchImpl,
+      }),
+    ).rejects.toThrow(
+      'Electron sidecar command "get_accounts" failed with HTTP 500: Connection failed to [sidecar]',
+    );
+  });
+});

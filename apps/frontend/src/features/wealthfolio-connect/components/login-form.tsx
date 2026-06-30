@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import { useWealthfolioConnect } from "../providers/wealthfolio-connect-provider";
 import { ProviderButton } from "./provider-button";
 
-// OAuth is only available on desktop/mobile (Tauri) where we can handle deep links
+// OAuth is only available in the desktop app where we can handle deep links.
 // Web (self-hosted) uses email OTP only since we can't register all possible redirect URLs
 const isNativeApp = isDesktop;
 

@@ -84,7 +84,7 @@ pub fn enqueue_portfolio_job(state: Arc<AppState>, config: PortfolioJobConfig) {
     });
 }
 
-/// Trigger a lightweight portfolio update (no full recalculation) similar to Tauri defaults.
+/// Trigger a lightweight portfolio update (no full recalculation) for desktop/web defaults.
 /// Uses MarketSyncMode::None - no market sync, just recalculation.
 pub fn trigger_lightweight_portfolio_update(state: Arc<AppState>) {
     enqueue_portfolio_job(

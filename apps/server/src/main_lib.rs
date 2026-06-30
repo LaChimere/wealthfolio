@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::{
@@ -165,21 +165,7 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_path_buf();
 
-    let resolved_secret_path = std::env::var("WF_SECRET_FILE")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_root_path.join("secrets.json"));
-    let file_store = build_secret_store(
-        resolved_secret_path.clone(),
-        Some(config.secrets_encryption_key),
-        Some(&config.raw_secret_key),
-    )
-    .map_err(anyhow::Error::new)?;
-    let secret_store: Arc<dyn SecretStore> = Arc::new(file_store);
-    std::env::set_var(
-        "WF_SECRET_FILE",
-        resolved_secret_path.to_string_lossy().to_string(),
-    );
+    let secret_store = build_runtime_secret_store(config, &data_root_path)?;
 
     db::run_migrations(&db_path)?;
 
@@ -557,4 +543,99 @@ pub async fn build_state(config: &Config) -> anyhow::Result<Arc<AppState>> {
     start_sync_outbox_wake_worker(sync_outbox_wake_receiver, Arc::clone(&state));
 
     Ok(state)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SecretBackend {
+    File,
+    Keyring,
+}
+
+fn parse_secret_backend(raw: Option<&str>) -> anyhow::Result<SecretBackend> {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(SecretBackend::File),
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "file" => Ok(SecretBackend::File),
+            "keyring" => Ok(SecretBackend::Keyring),
+            _ => anyhow::bail!(
+                "Invalid WF_SECRET_BACKEND value '{value}'. Expected 'file' or 'keyring'."
+            ),
+        },
+    }
+}
+
+fn build_runtime_secret_store(
+    config: &Config,
+    data_root_path: &Path,
+) -> anyhow::Result<Arc<dyn SecretStore>> {
+    let backend = parse_secret_backend(std::env::var("WF_SECRET_BACKEND").ok().as_deref())?;
+    build_runtime_secret_store_for_backend(backend, config, data_root_path)
+}
+
+fn build_runtime_secret_store_for_backend(
+    backend: SecretBackend,
+    config: &Config,
+    data_root_path: &Path,
+) -> anyhow::Result<Arc<dyn SecretStore>> {
+    match backend {
+        SecretBackend::File => {
+            let resolved_secret_path = std::env::var("WF_SECRET_FILE")
+                .ok()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| data_root_path.join("secrets.json"));
+            let file_store = build_secret_store(
+                resolved_secret_path.clone(),
+                Some(config.secrets_encryption_key),
+                Some(&config.raw_secret_key),
+            )
+            .map_err(anyhow::Error::new)?;
+            Ok(Arc::new(file_store))
+        }
+        SecretBackend::Keyring => build_keyring_secret_store(),
+    }
+}
+
+#[cfg(feature = "keyring-backend")]
+fn build_keyring_secret_store() -> anyhow::Result<Arc<dyn SecretStore>> {
+    Ok(wealthfolio_desktop_secrets::shared_secret_store())
+}
+
+#[cfg(not(feature = "keyring-backend"))]
+fn build_keyring_secret_store() -> anyhow::Result<Arc<dyn SecretStore>> {
+    anyhow::bail!(
+        "WF_SECRET_BACKEND=keyring requires the wealthfolio-server keyring-backend feature"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_backend_defaults_to_file_for_unset_or_empty_values() {
+        assert_eq!(parse_secret_backend(None).unwrap(), SecretBackend::File);
+        assert_eq!(parse_secret_backend(Some("")).unwrap(), SecretBackend::File);
+        assert_eq!(
+            parse_secret_backend(Some("   ")).unwrap(),
+            SecretBackend::File
+        );
+    }
+
+    #[test]
+    fn secret_backend_accepts_file_and_keyring_values() {
+        assert_eq!(
+            parse_secret_backend(Some("file")).unwrap(),
+            SecretBackend::File
+        );
+        assert_eq!(
+            parse_secret_backend(Some(" KEYRING ")).unwrap(),
+            SecretBackend::Keyring
+        );
+    }
+
+    #[test]
+    fn secret_backend_rejects_unknown_values() {
+        let error = parse_secret_backend(Some("vault")).unwrap_err();
+        assert!(error.to_string().contains("Expected 'file' or 'keyring'"));
+    }
 }

@@ -8,6 +8,8 @@ fn cleanup_env() {
     for key in [
         "WF_DB_PATH",
         "WF_SECRET_KEY",
+        "WF_SECRET_FILE",
+        "WF_SECRET_BACKEND",
         "WF_STATIC_DIR",
         "WF_LISTEN_ADDR",
     ] {
@@ -17,6 +19,7 @@ fn cleanup_env() {
 
 #[tokio::test]
 async fn serves_index_html_for_unknown_route() {
+    cleanup_env();
     let db_dir = tempdir().unwrap();
     let static_dir = tempdir().unwrap();
     let index_path = static_dir.path().join("index.html");

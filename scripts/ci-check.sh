@@ -80,7 +80,7 @@ while IFS= read -r file; do
     *.ts|*.tsx|*.js|*.jsx|*.css|*.mjs|*.cjs|*.json)
       RUN_FRONTEND=true
       ;;
-    package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig*.json)
+    package.json|bun.lock|tsconfig*.json)
       RUN_FRONTEND=true
       ;;
     vite.config.*|eslint.config.*|prettier.config.*)
@@ -89,7 +89,7 @@ while IFS= read -r file; do
     postcss.config.*|tailwind.config.*)
       RUN_FRONTEND=true
       ;;
-    apps/frontend/*|packages/*/package.json)
+    apps/frontend/*|apps/electron/*|packages/*/package.json)
       RUN_FRONTEND=true
       ;;
     .github/workflows/pr-check.yml|scripts/ci-check.sh)
@@ -108,7 +108,7 @@ if [[ "$RUN_RUST" == "false" && "$RUN_FRONTEND" == "false" ]]; then
   exit 0
 fi
 
-ensure_tauri_dist() {
+ensure_frontend_dist() {
   if [[ ! -f dist/index.html ]]; then
     mkdir -p dist
     echo '<!DOCTYPE html><html><head></head><body></body></html>' > dist/index.html
@@ -116,7 +116,7 @@ ensure_tauri_dist() {
 }
 
 if [[ "$RUN_RUST" == "true" ]]; then
-  ensure_tauri_dist
+  ensure_frontend_dist
 
   echo "=== cargo fmt ===" >&2
   cargo fmt --all -- --check
@@ -127,30 +127,42 @@ if [[ "$RUN_RUST" == "true" ]]; then
   if [[ "$FULL" == "true" ]]; then
     echo "=== cargo test ===" >&2
     CONNECT_API_URL=http://test.local cargo test --workspace
-
-    echo "=== cargo build (wealthfolio-server) ===" >&2
-    cargo build -p wealthfolio-server --release
   fi
 fi
 
 if [[ "$RUN_FRONTEND" == "true" ]]; then
-  echo "=== pnpm build:types ===" >&2
-  pnpm run build:types
+  echo "=== bun biome:ci ===" >&2
+  bun run biome:ci
 
-  echo "=== pnpm format:check ===" >&2
-  pnpm format:check
+  echo "=== bun build:types ===" >&2
+  bun run build:types
 
-  echo "=== pnpm lint ===" >&2
-  pnpm lint
+  echo "=== bun format:check ===" >&2
+  bun run format:check
 
-  echo "=== pnpm type-check ===" >&2
-  pnpm type-check
+  echo "=== bun lint ===" >&2
+  bun run lint
+
+  echo "=== bun type-check ===" >&2
+  bun run type-check
 
   if [[ "$FULL" == "true" ]]; then
-    echo "=== pnpm test ===" >&2
-    pnpm test
+    echo "=== bun test ===" >&2
+    bun run test
 
-    echo "=== pnpm build ===" >&2
-    pnpm build
+    echo "=== bun test:backend ===" >&2
+    bun run test:backend
+
+    echo "=== bun test:electron ===" >&2
+    bun run test:electron
+
+    echo "=== bun test:addon-sdk ===" >&2
+    bun run test:addon-sdk
+
+    echo "=== bun test:backend-contracts ===" >&2
+    bun run test:backend-contracts
+
+    echo "=== bun build ===" >&2
+    bun run build
   fi
 fi

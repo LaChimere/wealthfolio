@@ -4,7 +4,7 @@
  * that are more understandable for end users.
  *
  * Uses structured keys that match the Host API categories (e.g., 'accounts.getAll', 'portfolio.getHoldings')
- * as detected by the backend permission system in src-tauri/src/addons/service.rs
+ * as detected by the backend permission system.
  *
  * Based on the Host API structure defined in packages/addon-sdk/src/host-api.ts
  */
@@ -101,6 +101,7 @@ export const FUNCTION_DISPLAY_NAMES: Record<string, string> = {
   // EventsAPI functions - Market events
   "events.market.onSyncStart": "Monitor market sync start",
   "events.market.onSyncComplete": "Monitor market sync completion",
+  "events.market.onSyncError": "Monitor market sync errors",
 
   // UI functions (addon extensions) - these use dotted notation in backend detection
   "ui.sidebar.addItem": "Add navigation items",

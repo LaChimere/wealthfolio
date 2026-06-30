@@ -83,7 +83,7 @@ function normalizeDraft(raw: UnknownObject, fallbackCurrency: string): RecordAct
     subtype: pickString(raw, "subtype", "subtype"),
     notes: pickString(raw, "notes", "notes"),
     priceSource: pickString(raw, "priceSource", "price_source") ?? "none",
-    // Rust backend sends "pricing_mode"; the single-tool UI historically used "quoteMode".
+    // Backend payloads may send "pricing_mode"; the single-tool UI historically used "quoteMode".
     // Accept both for backward compatibility.
     pricingMode:
       pickString(raw, "pricingMode", "pricing_mode") ??

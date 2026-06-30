@@ -164,6 +164,13 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
     riskLevel: 'medium',
   },
   {
+    id: 'query',
+    name: 'Query Cache',
+    description: 'Access to invalidate or refetch application query cache entries',
+    functions: ['getClient', 'invalidateQueries', 'refetchQueries'],
+    riskLevel: 'medium',
+  },
+  {
     id: 'secrets',
     name: 'Secrets Management',
     description: 'Access to secure storage for addon secrets',
@@ -197,6 +204,7 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
       'onUpdateError',
       'onSyncStart',
       'onSyncComplete',
+      'onSyncError',
     ],
     riskLevel: 'low',
   },

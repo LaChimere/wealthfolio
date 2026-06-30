@@ -91,8 +91,13 @@ const normalizeMic = (mic?: string | null): string => mic?.trim().toUpperCase() 
 
 const PROVIDER_SYMBOL_HINTS: Record<string, string> = {
   YAHOO: "e.g. AAPL, LYMS.DE",
-  COINGECKO: "e.g. bitcoin, ethereum",
-  TWELVEDATA: "e.g. AAPL, EUR/USD",
+  ALPHA_VANTAGE: "e.g. SHOP.TRT, EUR/USD, BTC-CAD",
+  MARKETDATA_APP: "e.g. AAPL",
+  METAL_PRICE_API: "e.g. XAU, XAG-1KG",
+  FINNHUB: "e.g. AAPL",
+  OPENFIGI: "e.g. US0378331005",
+  US_TREASURY_CALC: "e.g. US91282C",
+  BOERSE_FRANKFURT: "e.g. US0378331005",
 };
 
 function getSymbolPlaceholder(provider: string): string {

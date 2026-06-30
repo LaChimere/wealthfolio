@@ -1,31 +1,8 @@
 // Web adapter - Sync Crypto Commands
-// These call the REST API endpoints for E2EE cryptographic operations.
+// These call the web command registry for E2EE cryptographic operations.
 
 import type { EphemeralKeyPair } from "../types";
-import { API_PREFIX } from "./core";
-
-// Helper to make authenticated POST requests to crypto endpoints
-async function cryptoPost<T>(endpoint: string, body?: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${API_PREFIX}/sync/crypto/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-    credentials: "same-origin",
-  });
-
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      const err = await res.json();
-      msg = (err?.message ?? msg) as string;
-    } catch {
-      // ignore JSON parse error
-    }
-    throw new Error(msg);
-  }
-
-  return (await res.json()) as T;
-}
+import { invoke } from "./core";
 
 // Response type for endpoints that return a single string value
 interface StringResponse {
@@ -33,24 +10,24 @@ interface StringResponse {
 }
 
 export const syncGenerateRootKey = async (): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("generate-root-key");
+  const response = await invoke<StringResponse>("sync_generate_root_key");
   return response.value;
 };
 
 export const syncDeriveDek = async (rootKey: string, version: number): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("derive-dek", { rootKey, version });
+  const response = await invoke<StringResponse>("sync_derive_dek", { rootKey, version });
   return response.value;
 };
 
 export const syncGenerateKeypair = async (): Promise<EphemeralKeyPair> => {
-  return await cryptoPost<EphemeralKeyPair>("generate-keypair");
+  return await invoke<EphemeralKeyPair>("sync_generate_keypair");
 };
 
 export const syncComputeSharedSecret = async (
   ourSecret: string,
   theirPublic: string,
 ): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("compute-shared-secret", {
+  const response = await invoke<StringResponse>("sync_compute_shared_secret", {
     ourSecret,
     theirPublic,
   });
@@ -61,7 +38,7 @@ export const syncDeriveSessionKey = async (
   sharedSecret: string,
   context: string,
 ): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("derive-session-key", {
+  const response = await invoke<StringResponse>("sync_derive_session_key", {
     sharedSecret,
     context,
   });
@@ -69,36 +46,36 @@ export const syncDeriveSessionKey = async (
 };
 
 export const syncEncrypt = async (key: string, plaintext: string): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("encrypt", { key, plaintext });
+  const response = await invoke<StringResponse>("sync_encrypt", { key, plaintext });
   return response.value;
 };
 
 export const syncDecrypt = async (key: string, ciphertext: string): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("decrypt", { key, ciphertext });
+  const response = await invoke<StringResponse>("sync_decrypt", { key, ciphertext });
   return response.value;
 };
 
 export const syncGeneratePairingCode = async (): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("generate-pairing-code");
+  const response = await invoke<StringResponse>("sync_generate_pairing_code");
   return response.value;
 };
 
 export const syncHashPairingCode = async (code: string): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("hash-pairing-code", { code });
+  const response = await invoke<StringResponse>("sync_hash_pairing_code", { code });
   return response.value;
 };
 
 export const syncHmacSha256 = async (key: string, data: string): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("hmac-sha256", { key, data });
+  const response = await invoke<StringResponse>("sync_hmac_sha256", { key, data });
   return response.value;
 };
 
 export const syncComputeSas = async (sharedSecret: string): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("compute-sas", { sharedSecret });
+  const response = await invoke<StringResponse>("sync_compute_sas", { sharedSecret });
   return response.value;
 };
 
 export const syncGenerateDeviceId = async (): Promise<string> => {
-  const response = await cryptoPost<StringResponse>("generate-device-id");
+  const response = await invoke<StringResponse>("sync_generate_device_id");
   return response.value;
 };
