@@ -7234,6 +7234,11 @@ contract:
   publishes the Rust-shaped `{ failed_syncs, skipped_reasons }` payload through
   the event bus while preserving portfolio job execution. Full runtime suite and
   full repository check passed.
+- `pr5-market-sync-skipped-reason-event-runtime`: verification passed. The
+  runtime `/api/v1/market-data/sync` route now has focused coverage for an
+  unsupported preferred provider, proving the asset skips without network calls,
+  persists no quotes, and publishes the Rust-shaped `skipped_reasons` payload on
+  `market:sync-complete`. Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
