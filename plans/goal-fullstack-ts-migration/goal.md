@@ -5792,11 +5792,11 @@ updated_at: "2026-06-30T13:12:05+09:00"
 - Turn 1043: Ran dual-model unsupported replay review with Claude Opus 4.8 xhigh
   and GPT-5.5 xhigh. Both reviews found no actionable classification, cursor,
   decrypt-ordering, test-validity, or runtime regression issues.
-- Turn 1044: Reclassified unknown Connect reconcile actions after trigger-cycle
-  migration. READY trigger-cycle now records `state_error` for unknown future
-  reconcile actions instead of bubbling a stale `not_implemented` disabled
-  error, preserving cursor state and an actionable engine error. Trigger-cycle
-  runtime tests, backend type-check, and full repository check passed.
+- Turn 1044: Identified and replaced the stale `not_implemented` disabled branch
+  reached by unknown Connect reconcile actions after trigger-cycle migration.
+  Follow-up review against the Rust reference found that unknown but well-formed
+  actions should continue through push/pull; Turn 1045 records the corrected
+  parity behavior.
 - Turn 1045: Corrected unknown Connect reconcile handling to match Rust. Unknown
   but well-formed reconcile actions now proceed through the normal push/pull
   flow like the legacy engine, while malformed actions still produce
