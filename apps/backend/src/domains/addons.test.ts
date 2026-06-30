@@ -403,6 +403,27 @@ describe("TS addon domain", () => {
         }),
       }),
     ).rejects.toThrow("parent traversal");
+    for (const [entryName, expected] of [
+      ["/absolute.js", "absolute paths"],
+      ["C:/drive.js", "Windows drive prefixes"],
+      ["dir\\main.js", "backslashes"],
+      ["dir/./main.js", "Unsafe addon archive path"],
+      ["dir/\u0000main.js", "control characters"],
+    ] as const) {
+      await expect(
+        service.extractAddonZip({
+          zipData: addonZip({
+            [entryName]: "export default {};",
+            "manifest.json": JSON.stringify({
+              id: "unsafe-entry",
+              name: "Unsafe Entry",
+              version: "1.0.0",
+              main: "main.js",
+            }),
+          }),
+        }),
+      ).rejects.toThrow(expected);
+    }
     await expect(
       service.extractAddonZip({
         zipData: addonZip({
@@ -429,6 +450,32 @@ describe("TS addon domain", () => {
         }),
       }),
     ).rejects.toThrow("Failed to read file main.js");
+  });
+
+  test("rejects unsafe addon IDs before writing archive or staging paths", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-addons-"));
+    const service = createLocalAddonService({ appDataDir });
+    const unsafeIdZip = addonZip({
+      "manifest.json": JSON.stringify({
+        id: "nested/addon",
+        name: "Nested Addon",
+        version: "1.0.0",
+        main: "main.js",
+      }),
+      "main.js": "export default {};",
+    });
+
+    await expect(
+      service.installAddonZip({ zipData: unsafeIdZip, enableAfterInstall: true }),
+    ).rejects.toThrow("path separators are not allowed");
+    expect(existsSync(path.join(appDataDir, "addons", "nested"))).toBe(false);
+
+    await expect(
+      service.installAddonFromStaging({ addonId: "../escape", enableAfterInstall: true }),
+    ).rejects.toThrow("path separators are not allowed");
+    await expect(service.downloadAddonToStaging("bad\u0000id")).rejects.toThrow(
+      "control characters are not allowed",
+    );
   });
 
   test("fetches store listings and submits ratings with Rust-compatible headers", async () => {

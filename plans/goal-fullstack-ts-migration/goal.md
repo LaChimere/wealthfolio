@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1083
+turns_used: 1084
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T18:59:44+09:00"
+updated_at: "2026-06-30T19:02:31+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5996,6 +5996,11 @@ updated_at: "2026-06-30T18:59:44+09:00"
 - Turn 1083: Ran dual-model holdings review-fix verification with Claude Opus
   4.8 xhigh and GPT-5.5 xhigh. Both reviews confirmed the quote proof is now
   load-bearing and found no new actionable issues.
+- Turn 1084: Hardened local add-on archive install/staging paths. The TS add-on
+  runtime now rejects control-character archive entries and unsafe filesystem
+  add-on IDs with path separators, absolute paths, drive prefixes, or control
+  characters before writing installed or staged ZIP paths. Focused add-on tests
+  and full repository check passed.
 
 ## Deferred items
 
@@ -6237,10 +6242,13 @@ updated_at: "2026-06-30T18:59:44+09:00"
   uninstall, runtime file loading, enabled-on-startup loading, local ZIP
   extraction/install, add-on store listings/ratings/update checks/download
   staging/update installs, staged `{addonId}.zip` install cleanup, and safe
-  staging cleanup from `appDataDir/addons`, and the frontend now enforces
-  manifest permissions for SDK domain APIs, UI registration, and scoped secrets,
-  while archive security scanning, complete browser sandbox isolation, and React
-  Query cache access hardening still need dedicated add-on parity slices.
+  staging cleanup from `appDataDir/addons`; archive path scanning now rejects
+  traversal, absolute paths, drive prefixes, backslashes, dot components,
+  invalid UTF-8, control-character entries, and unsafe add-on IDs before
+  installed/staged filesystem writes; and the frontend now enforces manifest
+  permissions for SDK domain APIs, UI registration, and scoped secrets, while
+  complete browser sandbox isolation and React Query cache access hardening
+  still need dedicated add-on parity slices.
 - Market-data provider breadth and background orchestration remain active
   follow-ups. reason=exchange metadata, local quote persistence/import, Yahoo
   dividends/search/resolve, bounded custom-provider symbol quote resolution,

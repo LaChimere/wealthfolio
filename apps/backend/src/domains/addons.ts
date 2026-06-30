@@ -293,6 +293,7 @@ export function createLocalAddonService(options: LocalAddonServiceOptions): Addo
     },
 
     async downloadAddonToStaging(addonId) {
+      validateAddonFilesystemId(addonId);
       const zipData = await downloadAddonFromStore(storeContext, addonId);
       validateAddonZipDataForStaging(zipData);
       const extracted = extractAddonZip(zipData);
@@ -841,6 +842,7 @@ function ensureAddonsDirectory(appDataDir: string): string {
 }
 
 function getAddonPath(appDataDir: string, addonId: string): string {
+  validateAddonFilesystemId(addonId);
   const addonsDir = ensureAddonsDirectory(appDataDir);
   const addonDir = path.resolve(addonsDir, addonId);
   if (!pathInside(addonDir, addonsDir)) {
@@ -858,12 +860,28 @@ function getStagingPath(appDataDir: string, addonId?: string): string {
 }
 
 function getStagingZipPath(appDataDir: string, addonId: string): string {
+  validateAddonFilesystemId(addonId);
   const stagingDir = path.join(ensureAddonsDirectory(appDataDir), "staging");
   const target = path.resolve(stagingDir, `${addonId}.zip`);
   if (!pathInside(target, stagingDir)) {
     throw new Error(`Unsafe addon id '${addonId}'`);
   }
   return target;
+}
+
+function validateAddonFilesystemId(addonId: string): void {
+  if (addonId.trim() === "") {
+    throw new Error("Unsafe addon id: id is empty");
+  }
+  if (addonId.includes("/") || addonId.includes("\\")) {
+    throw new Error(`Unsafe addon id '${addonId}': path separators are not allowed`);
+  }
+  if (path.isAbsolute(addonId) || /^[A-Za-z]:/.test(addonId)) {
+    throw new Error(`Unsafe addon id '${addonId}': absolute paths are not allowed`);
+  }
+  if (containsControlCharacter(addonId)) {
+    throw new Error(`Unsafe addon id '${addonId}': control characters are not allowed`);
+  }
 }
 
 function pathInside(candidate: string, root: string): boolean {
@@ -1035,6 +1053,9 @@ function validateAddonArchivePath(fileName: string): void {
   if (fileName === "") {
     throw new Error("Unsafe addon archive path: path is empty");
   }
+  if (containsControlCharacter(fileName)) {
+    throw new Error(`Unsafe addon archive path '${fileName}': control characters are not allowed`);
+  }
   if (fileName.includes("\\")) {
     throw new Error(`Unsafe addon archive path '${fileName}': backslashes are not allowed`);
   }
@@ -1060,6 +1081,10 @@ function validateAddonArchivePath(fileName: string): void {
   if (!hasNormalComponent) {
     throw new Error(`Unsafe addon archive path '${fileName}': no file components found`);
   }
+}
+
+function containsControlCharacter(value: string): boolean {
+  return /[\u0000-\u001f\u007f]/.test(value);
 }
 
 function writeAddonArchiveFile(addonDir: string, file: AddonFileRecord): void {

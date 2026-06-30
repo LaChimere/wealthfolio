@@ -7546,6 +7546,11 @@ contract:
 - `pr5-runtime-ai-holdings-fix-review`: verification passed. Claude Opus 4.8
   xhigh and GPT-5.5 xhigh re-reviewed the holdings quote-proof fix, confirmed
   the seeded quote row is now load-bearing, and found no new actionable issues.
+- `pr5-addon-archive-path-hardening`: verification passed. The TS add-on runtime
+  now rejects control-character archive entries and unsafe filesystem add-on IDs
+  with path separators, absolute paths, drive prefixes, or control characters
+  before writing installed or staged ZIP paths. Focused add-on tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -7564,12 +7569,12 @@ contract:
   orchestration move with market-data/portfolio parity slices; remaining
   provider-backed symbol fetch/resolution and sync breadth moves with
   market-data/provider parity slices; full portfolio snapshot rebuilding side
-  effects move with holdings/portfolio parity slices; add-on security scanning,
-  full sandbox isolation, and query-cache hardening move with add-on runtime
-  parity slices; provider-backed asset resolution, remaining quote sync-outbox
-  emission outside migrated alternative-asset and market-data quote paths,
-  remaining activity/provider-backed asset resolution beyond import flows, sync
-  engine push/pull, and portfolio recalculation side effects move with
+  effects move with holdings/portfolio parity slices; complete browser sandbox
+  isolation and query-cache hardening move with add-on runtime parity slices;
+  provider-backed asset resolution, remaining quote sync-outbox emission outside
+  migrated alternative-asset and market-data quote paths, remaining
+  activity/provider-backed asset resolution beyond import flows, sync engine
+  push/pull, and portfolio recalculation side effects move with
   activities/import/device-sync runtime parity slices; device-sync integration
   for sync crypto moves with device-sync parity slices; broader health checks
   and real market sync fix execution move with health/calculation parity slices;
