@@ -8063,7 +8063,7 @@ async function triggerLocalDeviceSyncCycle(
       );
     }
     if (
-      reconcile.action === "PULL_TAIL" &&
+      localReconcileActionUsesPullTailFlow(reconcile.action) &&
       !reconcile.cursorInvalid &&
       localReconcileCursorOrDefault(reconcile) <= cursor &&
       !localHasPendingSyncOutbox(db)
@@ -8074,7 +8074,7 @@ async function triggerLocalDeviceSyncCycle(
       return localSyncCycleResult("ok", acquiredLockVersion, cursor);
     }
     if (
-      reconcile.action === "PULL_TAIL" &&
+      localReconcileActionUsesPullTailFlow(reconcile.action) &&
       !reconcile.cursorInvalid &&
       localReconcileCursorOrDefault(reconcile) > cursor &&
       !localHasPendingSyncOutbox(db)
@@ -8113,10 +8113,7 @@ async function triggerLocalDeviceSyncCycle(
         pulledCount: pullResult.pulledCount,
       });
     }
-    if (
-      (reconcile.action === "NOOP" || reconcile.action === "PULL_TAIL") &&
-      localHasPendingSyncOutbox(db)
-    ) {
+    if (localReconcileActionAllowsPendingPush(reconcile.action) && localHasPendingSyncOutbox(db)) {
       const acquiredLockVersion = localAcquireSyncCycleLock(db);
       let pushResult: {
         pushedCount: number;
@@ -8218,6 +8215,24 @@ async function triggerLocalDeviceSyncCycle(
     markLocalSyncCycleError(db, "state_error", `Failed to read sync state: ${errorMessage(error)}`);
     return localSyncCycleResult("state_error", lockVersion, cursor);
   }
+}
+
+function localReconcileActionUsesPullTailFlow(action: string | null): boolean {
+  return action === "PULL_TAIL" || localReconcileActionIsUnknown(action);
+}
+
+function localReconcileActionAllowsPendingPush(action: string | null): boolean {
+  return action === "NOOP" || action === "PULL_TAIL" || localReconcileActionIsUnknown(action);
+}
+
+function localReconcileActionIsUnknown(action: string | null): boolean {
+  return (
+    action !== null &&
+    action !== "NOOP" &&
+    action !== "WAIT_SNAPSHOT" &&
+    action !== "BOOTSTRAP_SNAPSHOT" &&
+    action !== "PULL_TAIL"
+  );
 }
 
 function persistNotReadyDeviceConfigBestEffort(

@@ -4677,7 +4677,7 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime Connect trigger-cycle route to unknown reconcile state error", async () => {
+  test("wires runtime Connect trigger-cycle route to unknown reconcile push-pull flow", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-reconcile-unknown-"),
     );
@@ -4725,7 +4725,9 @@ describe("TS backend runtime composition", () => {
       try {
         seedDb.exec(`
           UPDATE sync_cursor SET cursor = 9 WHERE id = 1;
-          UPDATE sync_engine_state SET lock_version = 4 WHERE id = 1;
+          UPDATE sync_engine_state
+          SET lock_version = 4, last_cycle_status = 'state_error', last_error = 'stale'
+          WHERE id = 1;
         `);
       } finally {
         seedDb.close();
@@ -4742,8 +4744,8 @@ describe("TS backend runtime composition", () => {
       });
       expect(triggerResponse.status).toBe(200);
       await expect(triggerResponse.json()).resolves.toMatchObject({
-        status: "state_error",
-        lockVersion: 4,
+        status: "ok",
+        lockVersion: 5,
         cursor: 9,
       });
 
@@ -4752,13 +4754,14 @@ describe("TS backend runtime composition", () => {
         expect(
           verifyDb
             .query<
-              { last_cycle_status: string | null; last_error: string | null },
+              { lock_version: number; last_cycle_status: string | null; last_error: string | null },
               []
-            >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+            >("SELECT lock_version, last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
             .get(),
         ).toEqual({
-          last_cycle_status: "state_error",
-          last_error: "Failed to read sync state: Unsupported reconcile action: FUTURE_ACTION",
+          lock_version: 5,
+          last_cycle_status: "ok",
+          last_error: null,
         });
       } finally {
         verifyDb.close();
