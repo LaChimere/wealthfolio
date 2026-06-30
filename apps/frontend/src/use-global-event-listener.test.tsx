@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
   return {
     brokerSyncStartHandler: undefined as ((event: unknown) => void) | undefined,
     brokerSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
+    marketSyncCompleteHandler: undefined as ((event: unknown) => void) | undefined,
     listenerNames,
     unlisteners,
     updatePortfolio: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +51,9 @@ vi.mock("@/adapters", () => {
         }
         if (name === "listenBrokerSyncComplete") {
           mocks.brokerSyncCompleteHandler = handler;
+        }
+        if (name === "listenMarketSyncComplete") {
+          mocks.marketSyncCompleteHandler = handler;
         }
         return Promise.resolve(mocks.unlisteners[name]);
       }),
@@ -82,6 +86,7 @@ vi.mock("sonner", () => ({
 afterEach(() => {
   mocks.brokerSyncStartHandler = undefined;
   mocks.brokerSyncCompleteHandler = undefined;
+  mocks.marketSyncCompleteHandler = undefined;
   mocks.updatePortfolio.mockClear();
   mocks.navigate.mockClear();
   mocks.logger.debug.mockClear();
@@ -165,5 +170,52 @@ describe("useGlobalEventListener", () => {
     const dispatched = dispatchEvent.mock.calls.at(-1)?.[0] as CustomEvent<typeof newAccounts>;
     expect(dispatched.type).toBe("open-new-accounts-modal");
     expect(dispatched.detail).toEqual(newAccounts);
+  });
+
+  it("handles market sync completion payloads with failed and skipped syncs", async () => {
+    const queryClient = new QueryClient();
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    }
+
+    renderHook(() => useGlobalEventListener(), { wrapper: Wrapper });
+    await waitFor(() => expect(mocks.marketSyncCompleteHandler).toBeDefined());
+
+    act(() => {
+      mocks.marketSyncCompleteHandler?.({
+        event: "market:sync-complete",
+        id: 1,
+        payload: {
+          failed_syncs: [],
+          skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+        },
+      });
+    });
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith("market-sync-start");
+    expect(mocks.toast.error).not.toHaveBeenCalled();
+
+    act(() => {
+      mocks.marketSyncCompleteHandler?.({
+        event: "market:sync-complete",
+        id: 2,
+        payload: {
+          failed_syncs: [["BAD", "Symbol not found: BAD"]],
+          skipped_reasons: [],
+        },
+      });
+    });
+
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "Price update failed for 1 asset",
+      expect.objectContaining({
+        id: "market-sync-error",
+        action: expect.objectContaining({ label: "View" }),
+      }),
+    );
+    const toastOptions = mocks.toast.error.mock.calls.at(-1)?.[1] as {
+      action: { onClick: () => void };
+    };
+    toastOptions.action.onClick();
+    expect(mocks.navigate).toHaveBeenCalledWith("/health");
   });
 });
