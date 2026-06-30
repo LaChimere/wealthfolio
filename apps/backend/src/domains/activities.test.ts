@@ -3334,6 +3334,59 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("preserves legacy symbol object metadata during direct provider resolution", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: () => [
+        {
+          symbol: "SHOP",
+          shortName: "Shopify Provider",
+          longName: "Shopify Provider",
+          exchange: "NYSE",
+          exchangeMic: "XNYS",
+          exchangeName: "NYSE",
+          quoteType: "EQUITY",
+          typeDisplay: "",
+          currency: "USD",
+          dataSource: "FINNHUB",
+          isExisting: false,
+          index: "",
+          score: 1,
+        },
+      ],
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+
+      const created = (await service.createActivity?.({
+        accountId: "account-1",
+        symbol: {
+          symbol: "SHOP",
+          name: "Explicit Shopify",
+          kind: "INVESTMENT",
+        },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+      })) as Activity;
+
+      expect(readAssetById(db, created.assetId ?? "")).toMatchObject({
+        name: "Explicit Shopify",
+        kind: "INVESTMENT",
+        instrument_exchange_mic: "XNYS",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {

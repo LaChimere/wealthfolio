@@ -2336,7 +2336,11 @@ async function directActivityInputWithProviderResolution(
     return input;
   }
 
-  const assetRecord = isRecord(input.asset) ? input.asset : {};
+  const assetRecord = isRecord(input.asset)
+    ? input.asset
+    : isRecord(input.symbol)
+      ? input.symbol
+      : {};
   return {
     ...input,
     asset: {

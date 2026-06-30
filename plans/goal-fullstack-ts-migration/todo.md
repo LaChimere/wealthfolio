@@ -7661,6 +7661,11 @@ contract:
   activity-created asset, while existing asset matches and explicit exchange
   identities remain unchanged. Focused activity unit/runtime tests and full
   repository check passed.
+- `pr5-direct-activity-provider-legacy-symbol-review-fix`: verification passed.
+  Review found provider-resolved direct creates could drop explicit metadata
+  from legacy `symbol: { ... }` asset objects; the resolver now preserves that
+  metadata while converting to canonical `asset` inputs. Focused activity
+  unit/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
