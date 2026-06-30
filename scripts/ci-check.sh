@@ -159,6 +159,9 @@ if [[ "$RUN_FRONTEND" == "true" ]]; then
     echo "=== bun test:addon-sdk ===" >&2
     bun run test:addon-sdk
 
+    echo "=== bun test:backend-contracts ===" >&2
+    bun run test:backend-contracts
+
     echo "=== bun build ===" >&2
     bun run build
   fi

@@ -57,6 +57,9 @@ jobs:
       - name: Run add-on SDK tests
         run: bun run test:addon-sdk
 
+      - name: Run backend contract tests
+        run: bun run test:backend-contracts
+
       - name: Build frontend
         run: bun run build
 
