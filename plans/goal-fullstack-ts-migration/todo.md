@@ -7316,6 +7316,10 @@ contract:
   domain tests now mirror the Rust export helper for `assetId` header renaming
   to `symbol` and JSON string escaping of quotes, commas, and newlines. Focused
   data-export tests, backend type-check, and full repository check passed.
+- `pr5-data-export-dual-review`: verification passed. Claude Opus 4.8 xhigh and
+  GPT-5.5 xhigh reviewed required provider construction and CSV parity evidence,
+  finding no actionable consumer, runtime-assumption, API compatibility,
+  test-validity, or Rust-parity issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
