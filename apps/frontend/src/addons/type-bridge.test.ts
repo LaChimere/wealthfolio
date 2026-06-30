@@ -205,6 +205,41 @@ describe("Addon Type Bridge", () => {
       );
     });
 
+    it("passes market sync completion payloads through permitted add-on event APIs", async () => {
+      const listenMarketSyncComplete = vi.fn().mockResolvedValue(vi.fn());
+      const sdkAPI = createSDKHostAPIBridge(
+        {
+          listenMarketSyncComplete,
+        } as Partial<InternalHostAPI> as InternalHostAPI,
+        "market-addon",
+        createAddonPermissionGuard({
+          addonId: "market-addon",
+          permissions: [declaredPermission("events.market", ["onSyncComplete"])],
+        }),
+      );
+      const handler = vi.fn();
+
+      await sdkAPI.events.market.onSyncComplete(handler);
+      expect(listenMarketSyncComplete).toHaveBeenCalledWith(handler);
+
+      const marketPayload = {
+        failed_syncs: [["BAD", "Symbol not found: BAD"]],
+        skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
+      };
+      const bridgeHandler = listenMarketSyncComplete.mock.calls[0]?.[0] as (event: unknown) => void;
+      bridgeHandler({
+        event: "market:sync-complete",
+        id: 1,
+        payload: marketPayload,
+      });
+
+      expect(handler).toHaveBeenCalledWith({
+        event: "market:sync-complete",
+        id: 1,
+        payload: marketPayload,
+      });
+    });
+
     it("ignores permission functions that were neither declared nor detected", () => {
       const allowedPaths = buildAllowedAddonPermissionPaths([
         {
