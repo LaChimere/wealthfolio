@@ -6197,6 +6197,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   teardown now restores Vitest spies before restoring global URL/fetch/ReactDOM
   state, preventing stale Blob URL mocks from leaking between tests. Focused
   frontend add-on tests and full repository check passed.
+- Turn 1125: Added TS health unclassified-asset classification checks. The
+  health service now uses the taxonomy provider to flag MARKET-priced positive
+  value holdings missing system-taxonomy assignments, with
+  warning/error/critical severity based on affected market value share and
+  runtime wiring through the taxonomy service. Full health tests and full
+  repository check passed.
 
 ## Deferred items
 

@@ -424,6 +424,7 @@ function createServicesFromDatabase(
   });
   const healthService = createHealthService(createHealthRepository(db), undefined, {
     accountProvider: accountService,
+    classificationCheckProvider: taxonomyService,
     classificationMigrationProvider: taxonomyService,
     exchangeRateProvider: exchangeRateService,
     holdingsProvider: holdingsService,

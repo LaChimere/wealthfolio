@@ -7,7 +7,7 @@ import type { ExchangeRateService, LatestFxRateSnapshot } from "./exchange-rates
 import type { HoldingsService } from "./holdings";
 import type { LatestQuoteSnapshot, MarketDataService } from "./market-data";
 import type { SettingsService } from "./settings";
-import type { TaxonomyService } from "./taxonomies";
+import type { AssetTaxonomyAssignment, Taxonomy, TaxonomyService } from "./taxonomies";
 
 export interface IssueDismissal {
   issueId: string;
@@ -87,6 +87,10 @@ export interface HealthServiceOptions {
     | "getLegacyClassificationMigrationDetails"
     | "migrateLegacyClassifications"
   >;
+  classificationCheckProvider?: {
+    getTaxonomies(): Taxonomy[];
+    getAssetAssignments(assetId: string): AssetTaxonomyAssignment[];
+  };
   exchangeRateProvider?: Pick<ExchangeRateService, "ensureFxPairs"> &
     Partial<Pick<ExchangeRateService, "getLatestFxRateSnapshots">>;
   holdingsProvider?: Pick<HoldingsService, "getHoldings">;
@@ -476,6 +480,7 @@ async function runChecks(
       ...(await analyzeFxIntegrity(options, config, checkedAt)),
       ...(await analyzeDataConsistency(repository, options, checkedAt)),
       ...(await analyzeLegacyClassificationMigration(options, checkedAt)),
+      ...(await analyzeUnclassifiedAssets(options, config, checkedAt)),
       ...analyzeTimezone(options, clientTimezone, checkedAt),
     ],
     options.warn,
@@ -1732,6 +1737,152 @@ function legacyClassificationMigrationIssue(input: {
     dataHash: input.dataHash,
     timestamp: toRustSerdeUtcRfc3339(input.timestamp),
   };
+}
+
+interface UnclassifiedHolding {
+  assetId: string;
+  symbol: string;
+  name: string | null;
+  marketValue: number;
+}
+
+async function analyzeUnclassifiedAssets(
+  options: HealthServiceOptions,
+  config: HealthConfig,
+  timestamp: Date,
+): Promise<HealthIssue[]> {
+  if (
+    !options.classificationCheckProvider?.getTaxonomies ||
+    !options.classificationCheckProvider?.getAssetAssignments ||
+    !options.holdingsProvider?.getHoldings
+  ) {
+    return [];
+  }
+
+  const accounts = getPortfolioHealthAccounts(options);
+  if (!accounts) {
+    return [];
+  }
+
+  const holdingsByAsset = new Map<string, UnclassifiedHolding>();
+  let totalPortfolioValue = 0;
+
+  for (const account of accounts) {
+    const holdings = await options.holdingsProvider.getHoldings(account.id);
+    for (const holding of holdings) {
+      const instrument = holding.instrument;
+      if (!instrument || instrument.pricingMode.toUpperCase() !== "MARKET") {
+        continue;
+      }
+      const marketValue = holding.marketValue.base;
+      if (marketValue <= 0) {
+        continue;
+      }
+      totalPortfolioValue += marketValue;
+      const existing = holdingsByAsset.get(instrument.id);
+      if (existing) {
+        existing.marketValue += marketValue;
+      } else {
+        holdingsByAsset.set(instrument.id, {
+          assetId: instrument.id,
+          symbol: instrument.symbol,
+          name: instrument.name,
+          marketValue,
+        });
+      }
+    }
+  }
+
+  if (holdingsByAsset.size === 0) {
+    return [];
+  }
+
+  let systemTaxonomyIds: string[];
+  try {
+    systemTaxonomyIds = options.classificationCheckProvider
+      .getTaxonomies()
+      .filter((taxonomy) => taxonomy.isSystem)
+      .map((taxonomy) => taxonomy.id);
+  } catch (error) {
+    options.warn?.(
+      `Failed to load system taxonomies for classification check: ${formatErrorMessage(error)}`,
+    );
+    return [];
+  }
+
+  if (systemTaxonomyIds.length === 0) {
+    return [];
+  }
+
+  const assetIds = [...holdingsByAsset.keys()];
+  const assignedTaxonomiesByAsset = new Map<string, Set<string>>();
+  for (const assetId of assetIds) {
+    try {
+      const assignments = options.classificationCheckProvider.getAssetAssignments(assetId);
+      assignedTaxonomiesByAsset.set(assetId, new Set(assignments.map((a) => a.taxonomyId)));
+    } catch (error) {
+      options.warn?.(
+        `Failed to load taxonomy assignments for ${assetId}: ${formatErrorMessage(error)}`,
+      );
+    }
+  }
+
+  const issues: HealthIssue[] = [];
+
+  for (const taxonomyId of systemTaxonomyIds) {
+    const unclassified: UnclassifiedHolding[] = [];
+    let unclassifiedMarketValue = 0;
+
+    for (const [assetId, holdingData] of holdingsByAsset) {
+      const assigned = assignedTaxonomiesByAsset.get(assetId);
+      if (!assigned?.has(taxonomyId)) {
+        unclassified.push(holdingData);
+        unclassifiedMarketValue += holdingData.marketValue;
+      }
+    }
+
+    if (unclassified.length === 0) {
+      continue;
+    }
+
+    const affectedMvPct =
+      totalPortfolioValue > 0 ? unclassifiedMarketValue / totalPortfolioValue : 0;
+    const severity: HealthSeverity =
+      affectedMvPct > config.mvEscalationThreshold
+        ? "CRITICAL"
+        : affectedMvPct > config.classificationWarnThreshold
+          ? "ERROR"
+          : "WARNING";
+    const assetIdsForHash = unclassified.map((h) => h.assetId);
+    const dataHash = computeDataHashWithSeverityAndMvPct(assetIdsForHash, severity, affectedMvPct);
+    const count = unclassified.length;
+
+    issues.push({
+      id: `classification:${taxonomyId}:${dataHash}`,
+      severity,
+      category: "CLASSIFICATION",
+      title: count === 1 ? "1 holding needs a category" : `${count} holdings need categories`,
+      message:
+        "Some holdings don't have a classification assigned. This affects your allocation charts and analytics.",
+      affectedCount: count,
+      affectedMvPct,
+      affectedItems: unclassified.map((h) => ({
+        id: h.assetId,
+        name: h.name ?? h.symbol,
+        symbol: h.symbol,
+        route: `/holdings/${rustUrlEncode(h.assetId)}`,
+      })),
+      navigateAction: {
+        route: "/holdings",
+        query: { filter: "unclassified" },
+        label: "View Holdings",
+      },
+      dataHash,
+      timestamp: toRustSerdeUtcRfc3339(timestamp),
+    });
+  }
+
+  return issues;
 }
 
 function filterDismissedIssues(

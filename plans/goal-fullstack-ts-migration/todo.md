@@ -7758,6 +7758,11 @@ contract:
   spies, allowing stale Blob URL mocks to leak between tests; teardown now
   restores spies first, then restores URL/fetch/ReactDOM globals. Focused
   frontend add-on tests and full repository check passed.
+- `pr5-health-unclassified-assets-check`: verification passed. The TS health
+  service now uses the taxonomy provider to flag MARKET-priced positive-value
+  holdings missing system-taxonomy assignments, with warning/error/critical
+  severity based on affected market value share and runtime wiring through the
+  taxonomy service. Full health tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

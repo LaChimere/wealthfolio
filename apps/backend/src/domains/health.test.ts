@@ -1975,6 +1975,397 @@ describe("TS health domain", () => {
     }
   });
 
+  test("emits no unclassified assets issues when classificationCheckProvider is absent", async () => {
+    const db = createHealthDb();
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100 })],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date("2026-05-14T12:00:00.000Z"),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const unclassifiedIssues = status?.issues.filter(
+        (i) => i.id.match(/^classification:[^:]+:[0-9a-f]+$/) && !i.id.includes("legacy_migration"),
+      );
+      expect(unclassifiedIssues).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits no unclassified assets issues when all holdings are classified", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100 }),
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 50 }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: (assetId) => [
+          {
+            id: `${assetId}:asset_class`,
+            assetId,
+            taxonomyId: "asset_class",
+            categoryId: "equities",
+            weight: 1,
+            source: "manual",
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits WARNING unclassified assets issue when few holdings lack classification", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    // MSFT is unclassified = 1% of total (1 / 100) — below 5% classificationWarnThreshold → WARNING
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 99 }),
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 1 }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: (assetId) =>
+          assetId === "AAPL"
+            ? [
+                {
+                  id: "AAPL:asset_class",
+                  assetId: "AAPL",
+                  taxonomyId: "asset_class",
+                  categoryId: "equities",
+                  weight: 1,
+                  source: "manual",
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ]
+            : [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeDefined();
+      expect(issue).toMatchObject({
+        id: expect.stringMatching(/^classification:asset_class:[0-9a-f]+$/),
+        severity: "WARNING",
+        category: "CLASSIFICATION",
+        title: "1 holding needs a category",
+        affectedCount: 1,
+        navigateAction: {
+          route: "/holdings",
+          query: { filter: "unclassified" },
+          label: "View Holdings",
+        },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits ERROR unclassified assets issue when > 5% of portfolio value lacks classification", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    // MSFT is unclassified = 10% of total (10 / 100) — above 5% → ERROR
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 90 }),
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 10 }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: (assetId) =>
+          assetId === "AAPL"
+            ? [
+                {
+                  id: "AAPL:asset_class",
+                  assetId: "AAPL",
+                  taxonomyId: "asset_class",
+                  categoryId: "equities",
+                  weight: 1,
+                  source: "manual",
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ]
+            : [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeDefined();
+      expect(issue).toMatchObject({ severity: "ERROR", affectedCount: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits CRITICAL unclassified assets issue when > 30% of portfolio value lacks classification", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    // MSFT is unclassified = 40% of total (40 / 100) — above 30% → CRITICAL
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 60 }),
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 40 }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: (assetId) =>
+          assetId === "AAPL"
+            ? [
+                {
+                  id: "AAPL:asset_class",
+                  assetId: "AAPL",
+                  taxonomyId: "asset_class",
+                  categoryId: "equities",
+                  weight: 1,
+                  source: "manual",
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ]
+            : [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeDefined();
+      expect(issue).toMatchObject({ severity: "CRITICAL", affectedCount: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("emits separate unclassified assets issues per system taxonomy, skips non-system", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100 })],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "sector",
+            name: "Sector",
+            color: "#111",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: "custom_tag",
+            name: "Custom Tag",
+            color: "#222",
+            description: null,
+            isSystem: false,
+            isSingleSelect: false,
+            sortOrder: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: () => [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const systemTaxonomyIssues = status?.issues.filter(
+        (i) =>
+          i.id.startsWith("classification:asset_class:") ||
+          i.id.startsWith("classification:sector:"),
+      );
+      expect(systemTaxonomyIssues).toHaveLength(2);
+      const customIssue = status?.issues.find((i) => i.id.startsWith("classification:custom_tag:"));
+      expect(customIssue).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips non-MARKET priced holdings for unclassified assets check", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100, pricingMode: "MANUAL" }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: () => [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("continues without crash when getTaxonomies throws in unclassified assets check", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100 })],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => {
+          throw new Error("DB unavailable");
+        },
+        getAssetAssignments: () => [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   test("rejects unsupported or malformed health fix actions before syncing", async () => {
     const db = createHealthDb();
     const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
