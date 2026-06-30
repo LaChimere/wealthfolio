@@ -7386,6 +7386,11 @@ contract:
   guarding that the backend event producer, web EventSource adapter, and
   Electron adapter all keep the new market sync error event visible alongside
   sync-complete. Backend-contracts tests and full repository check passed.
+- `pr5-full-ci-after-package-test-wiring`: verification passed. Full CI exposed
+  and the slice fixed a Rust clippy test-module ordering blocker plus a
+  date-sensitive market-data E2E fixture smoke.
+  `bash scripts/ci-check.sh --full` now passes with the add-on SDK and
+  backend-contracts tests wired in.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
