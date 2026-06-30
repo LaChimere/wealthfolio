@@ -7608,6 +7608,10 @@ contract:
   confirmed approve/poll now use the original flow device after later
   registration, old flows remain cancellable, and no new actionable issues were
   found.
+- `pr5-market-data-finnhub-search-source`: verification passed. TS market-data
+  search results from Finnhub fallback now report `dataSource: "FINNHUB"` like
+  the Rust Finnhub provider instead of inheriting Yahoo's data source label.
+  Focused market-data/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

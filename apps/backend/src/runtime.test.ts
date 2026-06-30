@@ -18650,7 +18650,7 @@ describe("TS backend runtime composition", () => {
           quoteType: "Stock",
           currency: "CAD",
           currencySource: "exchange_inferred",
-          dataSource: "YAHOO",
+          dataSource: "FINNHUB",
         }),
       ]);
       expect(calls).toEqual([

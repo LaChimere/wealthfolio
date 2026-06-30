@@ -2106,7 +2106,7 @@ function finnhubSearchItemToResult(
     typeDisplay: "",
     currency,
     currencySource: currency ? "exchange_inferred" : null,
-    dataSource: "YAHOO",
+    dataSource: FINNHUB_PROVIDER,
     isExisting: false,
     existingAssetId: null,
     index: "",

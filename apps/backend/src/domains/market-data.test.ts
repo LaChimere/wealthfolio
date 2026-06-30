@@ -77,7 +77,7 @@ describe("TS market data domain", () => {
           assetId: "asset-1",
           createdAt: "2026-01-01T10:00:00Z",
           timestamp: "2026-01-01T16:00:00Z",
-          dataSource: "YAHOO",
+          dataSource: "FINNHUB",
           open: 0,
           high: 11.5,
           low: 0,
@@ -4315,7 +4315,7 @@ describe("TS market data domain", () => {
           typeDisplay: "EQUITY",
           currency: "GBp",
           currencySource: null,
-          dataSource: "YAHOO",
+          dataSource: "FINNHUB",
           isExisting: true,
           existingAssetId: "EQUITY:AZN@XLON",
           index: "",
@@ -4483,7 +4483,7 @@ describe("TS market data domain", () => {
           quoteType: "Stock",
           currency: "CAD",
           currencySource: "exchange_inferred",
-          dataSource: "YAHOO",
+          dataSource: "FINNHUB",
         }),
       ]);
       expect(calls).toEqual([
