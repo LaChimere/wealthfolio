@@ -6229,6 +6229,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   remote replay event is applied, matching Rust `ReplayStore::on_pull_complete`
   behavior so downstream portfolio jobs run after pull replay. Focused Connect
   tests and full repository check passed.
+- Turn 1131: Hardened add-on UI route registration. Sidebar and router
+  registration now reject external, protocol-like, control-character, or
+  whitespace-padded routes and only accept internal app paths (or the existing
+  `#` sidebar placeholder), preventing add-on UI permissions from injecting
+  unsafe navigation targets. Focused frontend add-on tests and full repository
+  check passed.
 
 ## Deferred items
 

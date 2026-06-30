@@ -136,6 +136,28 @@ function addonQueryClientFacade(queryClient: AddonQueryClientLike | undefined) {
   };
 }
 
+function assertInternalAddonRoute(addonId: string, route: string, permissionPath: string): void {
+  if (route === "#") {
+    return;
+  }
+  if (
+    route.length === 0 ||
+    route.trim() !== route ||
+    hasControlCharacter(route) ||
+    !route.startsWith("/") ||
+    route.startsWith("//")
+  ) {
+    throw new Error(`Addon ${addonId} must provide an internal app route for ${permissionPath}`);
+  }
+}
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
+}
+
 // Function to notify navigation update listeners
 function notifyNavigationUpdate() {
   navigationUpdateListeners.forEach((listener) => listener());
@@ -225,12 +247,14 @@ export function createAddonContext(
         onClick?: () => void;
       }): SidebarItemHandle => {
         permissionGuard.assertAllowed("context.sidebar.addItem");
+        const href = cfg.route ?? "#";
+        assertInternalAddonRoute(addonId, href, "context.sidebar.addItem");
 
         // Create navigation item
         const navItem = {
           icon: cfg.icon ?? '<Icons.Circle className="h-5 w-5" />',
           title: cfg.label,
-          href: cfg.route ?? "#",
+          href,
           onClick: cfg.onClick,
           order: cfg.order ?? 999,
           id: cfg.id,
@@ -256,6 +280,7 @@ export function createAddonContext(
         component: React.LazyExoticComponent<React.ComponentType<unknown>>;
       }): void => {
         permissionGuard.assertAllowed("context.router.add");
+        assertInternalAddonRoute(addonId, r.path, "context.router.add");
 
         // Store the route component
         dynamicRoutes.set(r.path, r.component);

@@ -59,6 +59,37 @@ describe("addon runtime context permissions", () => {
     expect(getDynamicRoutes()).toHaveLength(0);
   });
 
+  it("rejects external add-on navigation routes", () => {
+    const context = createAddonContext("ui-addon", [
+      declaredPermission("ui", ["sidebar.addItem", "router.add"]),
+    ]);
+
+    expect(() =>
+      context.sidebar.addItem({
+        id: "external",
+        label: "External",
+        route: "https://example.test",
+      }),
+    ).toThrow("Addon ui-addon must provide an internal app route for context.sidebar.addItem");
+    expect(getDynamicNavItems()).toHaveLength(0);
+
+    expect(() =>
+      context.router.add({
+        path: "//example.test",
+        component: React.lazy(async () => ({ default: () => null })),
+      }),
+    ).toThrow("Addon ui-addon must provide an internal app route for context.router.add");
+    expect(getDynamicRoutes()).toHaveLength(0);
+
+    expect(() =>
+      context.router.add({
+        path: "/addons/safe",
+        component: React.lazy(async () => ({ default: () => null })),
+      }),
+    ).not.toThrow();
+    expect(getDynamicRoutes()).toEqual([{ path: "/addons/safe", component: expect.any(Object) }]);
+  });
+
   it("blocks scoped secrets without a secrets permission", async () => {
     const context = createAddonContext("secret-addon", []);
 

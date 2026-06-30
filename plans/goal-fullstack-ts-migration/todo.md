@@ -7792,6 +7792,12 @@ contract:
   `ReplayStore::on_pull_complete` behavior so downstream portfolio jobs are
   triggered outside snapshot bootstrap restores. Focused Connect tests and
   backend type-check passed.
+- `pr5-addon-ui-route-hardening`: verification passed. Sidebar and router
+  registration now reject external, protocol-like, control-character, or
+  whitespace-padded routes and only accept internal app paths (or the existing
+  `#` sidebar placeholder), preventing add-on UI permissions from injecting
+  unsafe navigation targets. Focused frontend add-on tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
