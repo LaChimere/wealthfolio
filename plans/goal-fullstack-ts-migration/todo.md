@@ -7588,6 +7588,11 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed the serialized registration persistence
   queue, confirmed it fixes the prior rollback clobbering issue, and found no
   new actionable issues.
+- `pr5-device-cancel-register-secret-serialization`: verification passed.
+  Pairing-flow cancellation cleanup now shares the registration persistence
+  queue and conditionally skips clearing secrets if a concurrent successful
+  registration has moved `sync_identity`/`sync_device_id` to a new device.
+  Focused pairing/concurrency tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
