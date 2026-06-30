@@ -4845,7 +4845,7 @@ async function applyLocalEnableSyncSideEffects(
   result: Record<string, unknown>,
 ): Promise<void> {
   const deviceId = requiredStringValue(result.deviceId, "enable sync response");
-  await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
+  await saveLegacyDeviceIdBestEffort(secretService, deviceId);
   clearAllDeviceSyncFreshnessGates(db);
   if (result.state !== "READY" || !sqliteTableExists(db, "sync_device_config")) {
     return;
@@ -4886,6 +4886,17 @@ async function resetLocalTeamSyncChecked(
       "Team sync reset was not accepted. Please verify account permissions and try again.",
       500,
     );
+  }
+}
+
+async function saveLegacyDeviceIdBestEffort(
+  secretService: SecretService,
+  deviceId: string,
+): Promise<void> {
+  try {
+    await secretService.setSecret(DEVICE_SYNC_DEVICE_ID_KEY, deviceId);
+  } catch (error) {
+    console.warn(`[Connect] Failed to store legacy sync device ID: ${errorMessage(error)}`);
   }
 }
 

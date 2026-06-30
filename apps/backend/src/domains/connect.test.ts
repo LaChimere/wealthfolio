@@ -7090,6 +7090,71 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("does not fail enable sync when legacy device id persistence fails", async () => {
+    const db = createDeviceSyncStateDb();
+    const baseSecretService = createMemorySecretService();
+    baseSecretService.entries.set("sync_refresh_token", "refresh-token");
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService: {
+        ...baseSecretService,
+        setSecret(secretKey, secret) {
+          if (secretKey === "sync_device_id") {
+            throw new Error("legacy keyring unavailable");
+          }
+          baseSecretService.entries.set(secretKey, secret);
+        },
+      },
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      appVersion: "3.4.0",
+      reinitializeDelayMs: 0,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          return Response.json({
+            mode: "PAIR",
+            device_id: "device-1",
+            e2ee_key_version: 4,
+            require_sas: true,
+            pairing_ttl_seconds: 300,
+            trusted_devices: [
+              { id: "device-2", name: "iPhone", platform: "ios", last_seen_at: null },
+            ],
+          });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      },
+    });
+
+    try {
+      await expect(service.enableDeviceSync()).resolves.toMatchObject({
+        deviceId: "device-1",
+        state: "REGISTERED",
+      });
+      expect(JSON.parse(baseSecretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        version: 2,
+        deviceId: "device-1",
+        rootKey: null,
+        keyVersion: null,
+      });
+      expect(baseSecretService.entries.has("sync_device_id")).toBe(false);
+      expect(warnings).toEqual([
+        "[Connect] Failed to store legacy sync device ID: legacy keyring unavailable",
+      ]);
+    } finally {
+      console.warn = originalWarn;
+      db.close();
+    }
+  });
+
   test("rejects malformed Connect enrollment response tokens before storing identity", async () => {
     const db = createDeviceSyncStateDb();
     const secretService = createMemorySecretService();
