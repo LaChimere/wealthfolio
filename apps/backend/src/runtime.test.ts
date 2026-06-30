@@ -20448,6 +20448,77 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("resolves Portfolio account scopes through the standalone runtime routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-portfolio-scope-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() =>
+        Promise.reject(new Error("unexpected market data fetch"))) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const postJson = (pathName: string, body: Record<string, unknown>) =>
+      fetch(`${server.baseUrl}${pathName}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      const db = openSqliteDatabase(runtime.dbPath);
+      try {
+        db.prepare(
+          `
+            INSERT INTO accounts (
+              id, name, account_type, "group", currency, is_default, is_active,
+              is_archived, tracking_mode
+            )
+            VALUES
+              ('portfolio-scope-account-1', 'Scope One', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
+              ('portfolio-scope-account-2', 'Scope Two', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+          `,
+        ).run();
+      } finally {
+        db.close();
+      }
+
+      const createResponse = await postJson("/api/v1/portfolios", {
+        name: "Scoped Portfolio",
+        description: null,
+        sortOrder: 1,
+        accountIds: ["portfolio-scope-account-1", "portfolio-scope-account-2"],
+      });
+      expect(createResponse.status).toBe(200);
+      const created = (await createResponse.json()) as { id: string };
+      const portfolioFilter = { type: "Portfolio", portfolioId: created.id };
+
+      const holdingsResponse = await postJson("/api/v1/holdings/query", {
+        filter: portfolioFilter,
+      });
+      expect(holdingsResponse.status).toBe(200);
+      await expect(holdingsResponse.json()).resolves.toEqual([]);
+
+      const allocationsResponse = await postJson("/api/v1/allocations/query", {
+        filter: portfolioFilter,
+      });
+      expect(allocationsResponse.status).toBe(200);
+      await expect(allocationsResponse.json()).resolves.toMatchObject({
+        totalValue: 0,
+        customGroups: [],
+      });
+
+      const incomeResponse = await postJson("/api/v1/income/summary/query", {
+        filter: portfolioFilter,
+      });
+      expect(incomeResponse.status).toBe(200);
+      await expect(incomeResponse.json()).resolves.toEqual([]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("persists runtime holdings snapshot sync callbacks to sync_outbox", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-snapshot-sync-"));
     const runtime = createSqliteBackedBackendServices({
