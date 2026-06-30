@@ -181,6 +181,16 @@ describe("TS backend runtime composition", () => {
       } finally {
         seedDb.close();
       }
+      const { holdingsService } = runtime.options;
+      if (!holdingsService) {
+        throw new Error("Runtime AI tool stream test requires holdings service");
+      }
+      await holdingsService.saveManualHoldings({
+        accountId: "ai-tool-account",
+        snapshotDate: "2026-04-02",
+        holdings: [],
+        cashBalances: { USD: "42" },
+      });
 
       const clearResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
         method: "DELETE",
@@ -2713,7 +2723,7 @@ describe("TS backend runtime composition", () => {
         providerBodies.push(body);
         if (providerBodies.length === 1) {
           return new Response(
-            '{"message":{"tool_calls":[{"id":"runtime-tool-call","function":{"name":"get_accounts","arguments":{}}}]},"done":false}\n{"done":true}\n',
+            '{"message":{"tool_calls":[{"id":"runtime-accounts-call","function":{"name":"get_accounts","arguments":{}}},{"id":"runtime-cash-call","function":{"name":"get_cash_balances","arguments":{"accountId":"ai-tool-account"}}}]},"done":false}\n{"done":true}\n',
             { headers: { "content-type": "application/x-ndjson" } },
           );
         }
@@ -2737,11 +2747,30 @@ describe("TS backend runtime composition", () => {
       expect(events.map((event) => event.type)).toEqual([
         "system",
         "toolCall",
+        "toolCall",
+        "toolResult",
         "toolResult",
         "textDelta",
         "done",
       ]);
       expect(JSON.stringify(events)).toContain("Runtime AI Tool Account");
+      const toolResults = events.filter((event) => event.type === "toolResult") as Array<{
+        result?: { toolName?: string; success?: boolean; data?: Record<string, unknown> };
+      }>;
+      expect(toolResults).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            result: expect.objectContaining({ toolName: "get_accounts", success: true }),
+          }),
+          expect.objectContaining({
+            result: expect.objectContaining({
+              toolName: "get_cash_balances",
+              success: true,
+              data: expect.objectContaining({ baseCurrency: "USD" }),
+            }),
+          }),
+        ]),
+      );
       const exposedToolNames = (
         (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
       )
@@ -2751,6 +2780,7 @@ describe("TS backend runtime composition", () => {
       expect(exposedToolNames).not.toContain("record_activity");
       expect(exposedToolNames).not.toContain("import_csv");
       expect(JSON.stringify(providerBodies[1]?.messages)).toContain("Runtime AI Tool Account");
+      expect(JSON.stringify(providerBodies[1]?.messages)).toContain("get_cash_balances");
     } finally {
       globalThis.fetch = originalFetch;
       server.stop();
