@@ -8058,6 +8058,126 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("keeps Connect trigger-cycle cursor pinned on unsupported replay events", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-trigger-unsupported-replay-"),
+    );
+    const rootKey = Buffer.alloc(32, 23).toString("base64");
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      env: {
+        CONNECT_API_URL: "https://api.example.test",
+        CONNECT_AUTH_URL: "https://auth.example.test",
+      },
+      marketDataFetch: (async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
+        }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 35 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=12&limit=500")) {
+          return Response.json({
+            from: 12,
+            to: 35,
+            next_cursor: 35,
+            has_more: false,
+            events: [
+              {
+                event_id: "85858585-8585-4585-8585-858585858585",
+                device_id: "other-device",
+                type: "future_entity.create.v1",
+                entity: "future_entity",
+                entity_id: "future-entity-id",
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: "not-decrypted-for-unsupported-entity",
+                payload_key_version: 5,
+                seq: 35,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-runtime",
+          display_name: "MacBook",
+          platform: "mac",
+          trust_state: "trusted",
+          trusted_key_version: 5,
+        });
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      await runtime.options.secretService?.setSecret(
+        "sync_identity",
+        JSON.stringify({
+          version: 2,
+          deviceNonce: "nonce-runtime",
+          deviceId: "device-runtime",
+          rootKey,
+          keyVersion: 5,
+          deviceSecretKey: "secret-key",
+          devicePublicKey: "public-key",
+        }),
+      );
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb.exec("UPDATE sync_cursor SET cursor = 12 WHERE id = 1;");
+      } finally {
+        seedDb.close();
+      }
+      const sessionResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: "refresh-token" }),
+      });
+      expect(sessionResponse.status).toBe(200);
+
+      const triggerResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/trigger-cycle`, {
+        method: "POST",
+      });
+      expect(triggerResponse.status).toBe(200);
+      await expect(triggerResponse.json()).resolves.toMatchObject({
+        status: "pull_error",
+        pulledCount: 0,
+        cursor: 12,
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get(),
+        ).toEqual({ cursor: 12 });
+        expect(
+          verifyDb
+            .query<
+              { last_cycle_status: string | null; last_error: string | null },
+              []
+            >("SELECT last_cycle_status, last_error FROM sync_engine_state WHERE id = 1")
+            .get(),
+        ).toEqual({
+          last_cycle_status: "pull_error",
+          last_error:
+            "Pull failed: Unsupported sync event: entity=future_entity, type=future_entity.create.v1",
+        });
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime Connect trigger-cycle route to import-run replay", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-trigger-import-run-replay-"),

@@ -9208,7 +9208,7 @@ async function localApplyReplayEventsPage(
     }
     const replayEntity = localReplayEntity(event);
     if (replayEntity === null) {
-      throw deviceSyncDisabled();
+      throw unsupportedReplayEventError(event);
     }
     replayEvents.push({ event, replayEntity });
   }
@@ -9411,6 +9411,16 @@ function localApplyReplayEventPrepared(
     case "asset":
       return localApplyAssetReplayEvent(db, replayEvent.event, payloads);
   }
+}
+
+function unsupportedReplayEventError(event: Record<string, unknown>): ConnectServiceError {
+  const entity = optionalString(event.entity) ?? "<missing>";
+  const eventType = optionalString(event.type) ?? "<missing>";
+  return new ConnectServiceError(
+    "internal_error",
+    `Unsupported sync event: entity=${entity}, type=${eventType}`,
+    500,
+  );
 }
 
 function localApplyAccountReplayEvent(
