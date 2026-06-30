@@ -20508,6 +20508,19 @@ describe("TS backend runtime composition", () => {
         customGroups: [],
       });
 
+      const allocationHoldingsResponse = await postJson("/api/v1/allocations/holdings/query", {
+        filter: portfolioFilter,
+        taxonomyId: "asset_classes",
+        categoryId: "cash",
+      });
+      expect(allocationHoldingsResponse.status).toBe(200);
+      await expect(allocationHoldingsResponse.json()).resolves.toMatchObject({
+        taxonomyId: "asset_classes",
+        categoryId: "cash",
+        totalValue: 0,
+        holdings: [],
+      });
+
       const incomeResponse = await postJson("/api/v1/income/summary/query", {
         filter: portfolioFilter,
       });
