@@ -7655,6 +7655,12 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed unsupported add-on file install hardening
   and confirmed the web adapter no longer leaks file contents, Electron remains
   non-invoked, tests are meaningful, and status docs are accurate.
+- `pr5-direct-activity-provider-symbol-resolution`: verification passed. Direct
+  `/api/v1/activities` BUY/SELL-style creates can now resolve symbol-only asset
+  inputs through the existing market-data search seam before staging a new
+  activity-created asset, while existing asset matches and explicit exchange
+  identities remain unchanged. Focused activity unit/runtime tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -634,10 +634,11 @@ export function createActivityService(
 ): ActivityService {
   return {
     createActivity(input) {
-      if (options.ensureFxPairs) {
+      if (options.ensureFxPairs || options.symbolSearch) {
         return (async () => {
+          const resolvedInput = await directActivityInputWithProviderResolution(db, input, options);
           const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
-          const activity = normalizeActivityCreateInput(db, input, assetContext);
+          const activity = normalizeActivityCreateInput(db, resolvedInput, assetContext);
           ensureActivityCreateIsUnique(db, activity);
           const fxPairs = collectActivityFxPairs(db, activity, assetContext);
           if (fxPairs.length > 0) {
@@ -2264,6 +2265,91 @@ function normalizeImportQuoteCurrency(value: string | undefined): string | undef
 
 function addFieldMessage(messages: Record<string, string[]>, field: string, message: string): void {
   messages[field] = [...(messages[field] ?? []), message];
+}
+
+async function directActivityInputWithProviderResolution(
+  db: Database,
+  input: Record<string, unknown>,
+  options: ActivityServiceOptions,
+): Promise<Record<string, unknown>> {
+  if (!options.symbolSearch) {
+    return input;
+  }
+  const assetInput = activityAssetInputFromRecord(input);
+  if (
+    !assetInput?.symbol ||
+    assetInput.id ||
+    assetInput.exchangeMic ||
+    normalizeRequestedQuoteMode(assetInput.quoteMode) === "MANUAL"
+  ) {
+    return input;
+  }
+  const activityType = optionalTrimmedString(input.activityType);
+  if (!activityType) {
+    return input;
+  }
+  const disposition = importSymbolDisposition(
+    activityType,
+    optionalTrimmedString(input.subtype) ?? null,
+    assetInput.symbol,
+    parseOptionalImportDecimal(input.quantity),
+    parseOptionalImportDecimal(input.unitPrice),
+  );
+  if (disposition.kind !== "resolve") {
+    return input;
+  }
+
+  const normalizedAssetInput = normalizeActivityAssetInputForLookup(
+    assetInput,
+    options.exchangeMetadata,
+  );
+  try {
+    if (findExistingAssetBySymbol(db, normalizedAssetInput)) {
+      return input;
+    }
+  } catch (error) {
+    if (!errorMessage(error).startsWith("Multiple existing assets match symbol ")) {
+      throw error;
+    }
+    return input;
+  }
+
+  let accountCurrency: string;
+  try {
+    accountCurrency = readAccountRow(
+      db,
+      requiredNonEmptyString(input.accountId, "accountId"),
+    ).currency;
+  } catch {
+    return input;
+  }
+  const preferredCurrency =
+    normalizeImportQuoteCurrency(optionalTrimmedString(input.currency)) ??
+    normalizeImportQuoteCurrency(accountCurrency);
+  const resolution = await resolveImportAssetSymbol(
+    assetInput.symbol,
+    preferredCurrency,
+    options,
+    new Map(),
+  );
+  if (!resolution) {
+    return input;
+  }
+
+  const assetRecord = isRecord(input.asset) ? input.asset : {};
+  return {
+    ...input,
+    asset: {
+      ...assetRecord,
+      symbol: resolution.symbol ?? assetInput.symbol,
+      exchangeMic: resolution.exchangeMic,
+      instrumentType:
+        optionalTrimmedString(assetInput.instrumentType) ?? resolution.instrumentType ?? "EQUITY",
+      quoteCcy:
+        optionalTrimmedString(assetInput.quoteCcy) ?? resolution.quoteCcy ?? preferredCurrency,
+      ...(assetInput.name || !resolution.name ? {} : { name: resolution.name }),
+    },
+  };
 }
 
 async function checkActivitiesImportRows(

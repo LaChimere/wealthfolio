@@ -3251,6 +3251,89 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("provider-resolves direct symbol-only activity-created assets", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([
+          ["XNYS", "USD"],
+          ["XTSE", "CAD"],
+        ]),
+        yahooSuffixToMic: new Map([["TO", "XTSE"]]),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        if (query === "SHOP") {
+          return [
+            {
+              symbol: "SHOP",
+              shortName: "Shopify US",
+              longName: "Shopify US",
+              exchange: "NYSE",
+              exchangeMic: "XNYS",
+              exchangeName: "NYSE",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "USD",
+              dataSource: "FINNHUB",
+              isExisting: false,
+              index: "",
+              score: 1,
+            },
+          ];
+        }
+        if (query === "SHOP.TO") {
+          return [
+            {
+              symbol: "SHOP.TO",
+              shortName: "Shopify Canada",
+              longName: "Shopify Canada",
+              exchange: "TSX",
+              exchangeMic: "XTSE",
+              exchangeName: "TSX",
+              quoteType: "EQUITY",
+              typeDisplay: "",
+              currency: "CAD",
+              dataSource: "FINNHUB",
+              isExisting: false,
+              index: "",
+              score: 2,
+            },
+          ];
+        }
+        return [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "CAD" });
+
+      const created = (await service.createActivity?.({
+        accountId: "account-1",
+        asset: { symbol: "SHOP" },
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+      })) as Activity;
+
+      expect(calls).toEqual(["SHOP", "SHOP.TO"]);
+      expect(readAssetById(db, created.assetId ?? "")).toMatchObject({
+        name: "Shopify Canada",
+        display_code: "SHOP",
+        quote_mode: "MARKET",
+        quote_ccy: "CAD",
+        instrument_type: "EQUITY",
+        instrument_symbol: "SHOP",
+        instrument_exchange_mic: "XTSE",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {

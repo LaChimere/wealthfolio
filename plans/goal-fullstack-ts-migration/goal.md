@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1105
+turns_used: 1106
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T23:28:05+09:00"
+updated_at: "2026-06-30T23:39:18+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -6101,6 +6101,12 @@ updated_at: "2026-06-30T23:28:05+09:00"
   hardening with Claude Opus 4.8 xhigh and GPT-5.5 xhigh. Both reviews confirmed
   the web adapter no longer leaks file contents, Electron remains non-invoked,
   tests are meaningful, and status docs are accurate.
+- Turn 1106: Added provider-backed symbol resolution for direct activity
+  creates. Direct `/api/v1/activities` BUY/SELL-style creates can now resolve
+  symbol-only asset inputs through the existing market-data search seam before
+  staging a new activity-created asset, while keeping existing asset matches and
+  explicit exchange identities unchanged. Focused activity unit/runtime tests
+  and full repository check passed.
 
 ## Deferred items
 
