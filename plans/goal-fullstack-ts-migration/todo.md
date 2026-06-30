@@ -7646,6 +7646,11 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed the Connect legacy device-id best-effort
   slice and found no actionable correctness, security, parity, or
   consumer-compatibility issues.
+- `pr5-addon-adapter-install-file-error-hardening`: verification passed. The web
+  adapter no longer echoes addon source content in the unsupported
+  `installAddonFile` error, and web/Electron tests now cover that unsupported
+  single-file install paths do not leak file contents or invoke Electron.
+  Focused frontend adapter tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

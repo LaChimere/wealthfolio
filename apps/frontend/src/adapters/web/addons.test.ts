@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getEnabledAddons, getInstalledAddons, installAddon, submitAddonRating } from "./addons";
+import {
+  getEnabledAddons,
+  getInstalledAddons,
+  installAddon,
+  installAddonFile,
+  submitAddonRating,
+} from "./addons";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -58,5 +64,14 @@ describe("web addons adapter", () => {
       credentials: "same-origin",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("rejects unsupported single-file addon installs without echoing file contents", async () => {
+    await expect(installAddonFile("addon.js", "secret source", true)).rejects.toThrow(
+      "installAddonFile is not supported in web; use installAddonZip instead: addon.js, true",
+    );
+    await expect(installAddonFile("addon.js", "secret source", true)).rejects.not.toThrow(
+      "secret source",
+    );
   });
 });

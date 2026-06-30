@@ -6,6 +6,7 @@ import {
   getEnabledAddons,
   getInstalledAddons,
   installAddon,
+  installAddonFile,
   submitAddonRating,
 } from "./addons";
 
@@ -63,5 +64,18 @@ describe("electron addons adapter", () => {
       rating: 5,
       review: "Great",
     });
+  });
+
+  it("rejects unsupported single-file addon installs without invoking Electron", async () => {
+    const bridgeInvoke = vi.fn();
+    installElectronApi({ invoke: bridgeInvoke });
+
+    await expect(installAddonFile("addon.js", "secret source", true)).rejects.toThrow(
+      "installAddonFile is not supported in Electron; use installAddonZip instead: addon.js, true",
+    );
+    await expect(installAddonFile("addon.js", "secret source", true)).rejects.not.toThrow(
+      "secret source",
+    );
+    expect(bridgeInvoke).not.toHaveBeenCalled();
   });
 });
