@@ -13,6 +13,7 @@ afterEach(() => {
     __ASYNC_DEV_ADDON_DISABLED__?: boolean;
     __DEV_ADDONS__?: Map<string, { disable?: () => void }>;
   };
+  vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
@@ -20,7 +21,6 @@ afterEach(() => {
   delete globals.__ASYNC_DEV_ADDON_ENABLED__;
   delete globals.__ASYNC_DEV_ADDON_DISABLED__;
   globals.__DEV_ADDONS__?.clear();
-  vi.restoreAllMocks();
   addonDevManager.disableDevMode();
 });
 

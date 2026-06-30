@@ -7753,6 +7753,11 @@ contract:
   keyring-focused backend selector on Ubuntu, macOS, and Windows, making native
   keyring service-id/runtime startup parity visible outside the Linux-only full
   backend test job. Focused keyring tests and full repository check passed.
+- `pr5-addon-dev-teardown-review-fix`: verification passed. Review found the
+  dev-mode add-on test teardown restored URL globals before restoring Vitest
+  spies, allowing stale Blob URL mocks to leak between tests; teardown now
+  restores spies first, then restores URL/fetch/ReactDOM globals. Focused
+  frontend add-on tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

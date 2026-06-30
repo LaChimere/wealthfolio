@@ -6193,6 +6193,10 @@ updated_at: "2026-07-01T00:39:21+09:00"
   keyring-focused backend selector on Ubuntu, macOS, and Windows, making native
   keyring service-id/runtime startup parity visible outside the Linux-only full
   backend test job. Focused keyring tests and full repository check passed.
+- Turn 1124: Addressed add-on dev-mode review feedback. The dev-mode add-on test
+  teardown now restores Vitest spies before restoring global URL/fetch/ReactDOM
+  state, preventing stale Blob URL mocks from leaking between tests. Focused
+  frontend add-on tests and full repository check passed.
 
 ## Deferred items
 
