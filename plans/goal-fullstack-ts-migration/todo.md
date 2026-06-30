@@ -7420,6 +7420,11 @@ contract:
   allocation-holdings and income summary query routes include scoped account
   data and exclude the out-of-scope account. Focused runtime tests and full
   repository check passed.
+- `pr5-runtime-scope-deposit-dual-review`: verification passed. Claude Opus 4.8
+  xhigh and GPT-5.5 xhigh reviewed Portfolio scope and contribution deposit
+  runtime evidence and found no actionable remaining false-positive, DTO-shape,
+  fixture, expected-total, exclusion, contribution deposit, or scope-creep
+  issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
