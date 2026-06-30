@@ -9145,7 +9145,7 @@ describe("TS Connect device sync local service", () => {
       }),
     );
     let cycleCount = 0;
-    // Device fetch returns REGISTERED (not READY) so every cycle is not_ready.
+    let readyChecksRemaining = 0;
     const service = createLocalConnectDeviceSyncService({
       db,
       secretService,
@@ -9155,6 +9155,15 @@ describe("TS Connect device sync local service", () => {
           return Response.json({ access_token: "access-token" });
         }
         if (url.includes("/api/v1/sync/team/devices") && !url.includes("/trusted-devices")) {
+          if (readyChecksRemaining > 0) {
+            readyChecksRemaining -= 1;
+            return Response.json({
+              id: "device-1",
+              display_name: "MacBook",
+              trust_state: "trusted",
+              trusted_key_version: 1,
+            });
+          }
           cycleCount += 1;
           return Response.json({
             id: "device-1",
@@ -9172,7 +9181,10 @@ describe("TS Connect device sync local service", () => {
 
     try {
       // Phase 1: run several not_ready cycles then stop.
-      await service.startDeviceSyncBackgroundEngine();
+      readyChecksRemaining = 1;
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toMatchObject({
+        status: "started",
+      });
       const deadline1 = Date.now() + 500;
       while (Date.now() < deadline1 && cycleCount < 3) {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -9185,7 +9197,10 @@ describe("TS Connect device sync local service", () => {
       // immediately (scheduleBackgroundCycle(0)) and runs its first cycle
       // within the test window.
       const cyclesBeforeRestart = cycleCount;
-      await service.startDeviceSyncBackgroundEngine();
+      readyChecksRemaining = 1;
+      await expect(service.startDeviceSyncBackgroundEngine()).resolves.toMatchObject({
+        status: "started",
+      });
       const deadline2 = Date.now() + 500;
       while (Date.now() < deadline2 && cycleCount === cyclesBeforeRestart) {
         await new Promise((resolve) => setTimeout(resolve, 10));

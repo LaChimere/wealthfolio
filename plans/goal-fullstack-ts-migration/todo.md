@@ -7779,6 +7779,13 @@ contract:
   binding import check, so the Ubuntu/macOS/Windows PR matrix catches missing
   platform bindings without requiring OS keychain access. Focused keyring tests
   and full repository check passed.
+- `pr5-latest-review-health-backoff-fixes`: verification passed. Latest review
+  found unclassified-assets false-positive/severity gaps and a backoff test that
+  counted readiness probes rather than background cycles; the health check now
+  skips optional `custom_groups`, ignores assets whose assignment lookup failed,
+  and uses all instrument-bearing holdings for severity denominator, while the
+  backoff reset test asserts the engine starts before counting cycles. Focused
+  health/connect tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
@@ -7787,9 +7794,8 @@ contract:
   registration/no-op/portfolio-recalculation parity and explicit runtime 501
   gates; background portfolio worker orchestration moves with
   portfolio/calculation slices after the current bounded portfolio
-  valuation/activity-replay runtime; cross-platform keyring CI moves with a
-  dedicated runtime parity slice; AI chat richer provider/tool orchestration and
-  any future Ollama PDF support move with AI runtime parity slices if Ollama
+  valuation/activity-replay runtime; AI chat richer provider/tool orchestration
+  and any future Ollama PDF support move with AI runtime parity slices if Ollama
   documents non-image file inputs; asset quote-provider interactions and broader
   provider-driven portfolio recalculation side effects move with
   asset/market-data/portfolio parity slices after direct profile and quote-mode

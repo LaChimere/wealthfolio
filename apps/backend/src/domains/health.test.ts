@@ -2175,6 +2175,57 @@ describe("TS health domain", () => {
     }
   });
 
+  test("uses all instrument-bearing holdings for unclassified severity denominator", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [
+          holding({ assetId: "MSFT", symbol: "MSFT", marketValue: 10 }),
+          holding({
+            assetId: "MANUAL",
+            symbol: "MANUAL",
+            marketValue: 90,
+            pricingMode: "MANUAL",
+          }),
+        ],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: () => [],
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeDefined();
+      expect(issue).toMatchObject({
+        severity: "ERROR",
+        affectedCount: 1,
+        affectedMvPct: 0.1,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("emits CRITICAL unclassified assets issue when > 30% of portfolio value lacks classification", async () => {
     const db = createHealthDb();
     const now = "2026-05-14T12:00:00.000Z";
@@ -2267,6 +2318,17 @@ describe("TS health domain", () => {
             updatedAt: now,
           },
           {
+            id: "custom_groups",
+            name: "Custom Groups",
+            color: "#333",
+            description: "User-defined tags",
+            isSystem: true,
+            isSingleSelect: false,
+            sortOrder: 3,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
             id: "custom_tag",
             name: "Custom Tag",
             color: "#222",
@@ -2293,6 +2355,10 @@ describe("TS health domain", () => {
       expect(systemTaxonomyIssues).toHaveLength(2);
       const customIssue = status?.issues.find((i) => i.id.startsWith("classification:custom_tag:"));
       expect(customIssue).toBeUndefined();
+      const customGroupsIssue = status?.issues.find((i) =>
+        i.id.startsWith("classification:custom_groups:"),
+      );
+      expect(customGroupsIssue).toBeUndefined();
     } finally {
       db.close();
     }
@@ -2361,6 +2427,51 @@ describe("TS health domain", () => {
       const status = await service.runHealthChecks?.("UTC");
       const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
       expect(issue).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not report unclassified assets when assignment lookup fails", async () => {
+    const db = createHealthDb();
+    const now = "2026-05-14T12:00:00.000Z";
+    const warnings: string[] = [];
+    const service = createHealthService(createHealthRepository(db), DEFAULT_HEALTH_CONFIG, {
+      accountProvider: {
+        getActiveAccounts: () => [account({ id: "acct1" })],
+      },
+      holdingsProvider: {
+        getHoldings: () => [holding({ assetId: "AAPL", symbol: "AAPL", marketValue: 100 })],
+      },
+      classificationCheckProvider: {
+        getTaxonomies: () => [
+          {
+            id: "asset_class",
+            name: "Asset Class",
+            color: "#000",
+            description: null,
+            isSystem: true,
+            isSingleSelect: true,
+            sortOrder: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        getAssetAssignments: () => {
+          throw new Error("assignments unavailable");
+        },
+      },
+      settingsProvider: { getSettings: () => settings({ timezone: "UTC" }) },
+      now: () => new Date(now),
+      warn: (message) => warnings.push(message),
+    });
+    try {
+      const status = await service.runHealthChecks?.("UTC");
+      const issue = status?.issues.find((i) => i.id.startsWith("classification:asset_class:"));
+      expect(issue).toBeUndefined();
+      expect(warnings).toEqual([
+        "Failed to load taxonomy assignments for AAPL: assignments unavailable",
+      ]);
     } finally {
       db.close();
     }

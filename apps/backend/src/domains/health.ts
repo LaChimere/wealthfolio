@@ -178,6 +178,7 @@ export const DEFAULT_HEALTH_CONFIG: HealthConfig = {
 };
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
+const OPTIONAL_CLASSIFICATION_TAXONOMY_IDS = new Set(["custom_groups"]);
 const SEVERITY_ORDER: HealthSeverity[] = ["INFO", "WARNING", "ERROR", "CRITICAL"];
 const U64_MASK = 0xffffffffffffffffn;
 const RUST_HASH_STR_TERMINATOR = 0xff;
@@ -1771,14 +1772,17 @@ async function analyzeUnclassifiedAssets(
     const holdings = await options.holdingsProvider.getHoldings(account.id);
     for (const holding of holdings) {
       const instrument = holding.instrument;
-      if (!instrument || instrument.pricingMode.toUpperCase() !== "MARKET") {
+      if (!instrument) {
         continue;
       }
       const marketValue = holding.marketValue.base;
+      totalPortfolioValue += marketValue;
+      if (instrument.pricingMode.toUpperCase() !== "MARKET") {
+        continue;
+      }
       if (marketValue <= 0) {
         continue;
       }
-      totalPortfolioValue += marketValue;
       const existing = holdingsByAsset.get(instrument.id);
       if (existing) {
         existing.marketValue += marketValue;
@@ -1801,7 +1805,9 @@ async function analyzeUnclassifiedAssets(
   try {
     systemTaxonomyIds = options.classificationCheckProvider
       .getTaxonomies()
-      .filter((taxonomy) => taxonomy.isSystem)
+      .filter(
+        (taxonomy) => taxonomy.isSystem && !OPTIONAL_CLASSIFICATION_TAXONOMY_IDS.has(taxonomy.id),
+      )
       .map((taxonomy) => taxonomy.id);
   } catch (error) {
     options.warn?.(
@@ -1816,11 +1822,13 @@ async function analyzeUnclassifiedAssets(
 
   const assetIds = [...holdingsByAsset.keys()];
   const assignedTaxonomiesByAsset = new Map<string, Set<string>>();
+  const assignmentErrorAssetIds = new Set<string>();
   for (const assetId of assetIds) {
     try {
       const assignments = options.classificationCheckProvider.getAssetAssignments(assetId);
       assignedTaxonomiesByAsset.set(assetId, new Set(assignments.map((a) => a.taxonomyId)));
     } catch (error) {
+      assignmentErrorAssetIds.add(assetId);
       options.warn?.(
         `Failed to load taxonomy assignments for ${assetId}: ${formatErrorMessage(error)}`,
       );
@@ -1834,6 +1842,9 @@ async function analyzeUnclassifiedAssets(
     let unclassifiedMarketValue = 0;
 
     for (const [assetId, holdingData] of holdingsByAsset) {
+      if (assignmentErrorAssetIds.has(assetId)) {
+        continue;
+      }
       const assigned = assignedTaxonomiesByAsset.get(assetId);
       if (!assigned?.has(taxonomyId)) {
         unclassified.push(holdingData);

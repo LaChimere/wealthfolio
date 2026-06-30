@@ -6218,6 +6218,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   binding import check, so the Ubuntu/macOS/Windows PR matrix catches missing
   platform bindings without requiring OS keychain access. Focused keyring tests
   and full repository check passed.
+- Turn 1129: Addressed latest review feedback for health classification and
+  device-sync backoff tests. The unclassified-assets check now skips optional
+  `custom_groups`, avoids false alerts when assignment lookup fails, and uses
+  all instrument-bearing holdings for severity denominator; the not-ready
+  backoff reset test now proves the background engine starts before counting
+  cycles. Focused health/connect tests and full repository check passed.
 
 ## Deferred items
 
