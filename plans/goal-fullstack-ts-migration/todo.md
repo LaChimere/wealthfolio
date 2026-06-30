@@ -7245,6 +7245,11 @@ contract:
   Rust-shaped `failed_syncs` payload, no quote rows are written, and quote
   sync-state errors are recorded. Full runtime suite and full repository check
   passed.
+- `pr5-runtime-sse-market-sync-payload`: verification passed. The runtime
+  `/api/v1/events/stream` route now has focused coverage proving SSE
+  `market:sync-complete` messages carry JSON payloads from the runtime event
+  bus, including Rust-shaped `skipped_reasons` emitted by a market sync route.
+  Full runtime suite and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
