@@ -7188,6 +7188,13 @@ contract:
   proving ERROR severity, PRICE_STALENESS category, affected holdings routes,
   retry fix payloads, market-data navigation, and details text through the HTTP
   seam. Full runtime suite and full repository check passed.
+- `pr5-health-dismissal-route-runtime`: verification passed. The runtime
+  `/api/v1/health/dismiss`, `/api/v1/health/dismissed`, and
+  `/api/v1/health/restore` routes now have focused coverage proving persisted
+  dismissal filtering and restoration through the HTTP seam. This slice also
+  hardened MarketData.app and US Treasury provider smokes so they no longer
+  depend on the current UTC day boundary. Full runtime suite and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
