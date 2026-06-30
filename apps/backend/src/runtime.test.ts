@@ -3809,6 +3809,162 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat import CSV mapping results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-import-csv-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+    const csvContent = "Date,Type,Symbol,Quantity,Price,Total\n2026-01-17,Buy,AAPL,2,100,200";
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO accounts (
+                id, name, account_type, "group", currency, is_default, is_active,
+                is_archived, tracking_mode
+              )
+              VALUES ('ai-import-account', 'AI Import Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'TRANSACTIONS')
+            `,
+          )
+          .run();
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["import_csv"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            `${JSON.stringify({
+              message: {
+                tool_calls: [
+                  {
+                    id: "runtime-import-csv-call",
+                    function: {
+                      name: "import_csv",
+                      arguments: {
+                        csvContent,
+                        accountId: "ai-import-account",
+                        fieldMappings: {
+                          date: "Date",
+                          activityType: "Type",
+                          symbol: "Symbol",
+                          quantity: "Quantity",
+                          unitPrice: "Price",
+                          amount: "Total",
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+              done: false,
+            })}\n{"done":true}\n`,
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response('{"message":{"content":"CSV mapped."},"done":false}\n{"done":true}\n', {
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Import this CSV" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      ).map((tool) => tool.function?.name);
+      expect(exposedToolNames).toEqual(["import_csv"]);
+      expect(JSON.stringify(events)).toContain('"detectedHeaders":["Date","Type","Symbol"');
+      expect(JSON.stringify(events)).toContain('"totalRows":1');
+      const importToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(importToolMessage?.content))).toMatchObject({
+        accountId: "ai-import-account",
+        detectedHeaders: ["Date", "Type", "Symbol", "Quantity", "Price", "Total"],
+        sampleRows: [["2026-01-17", "Buy", "AAPL", "2", "100", "200"]],
+        totalRows: 1,
+        usedSavedProfile: false,
+        appliedMapping: {
+          accountId: "ai-import-account",
+          contextKind: "CSV_ACTIVITY",
+          fieldMappings: {
+            date: "Date",
+            activityType: "Type",
+            symbol: "Symbol",
+            quantity: "Quantity",
+            unitPrice: "Price",
+            amount: "Total",
+          },
+        },
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM activities").get()
+            ?.count,
+        ).toBe(0);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({

@@ -7520,6 +7520,12 @@ contract:
   stream Rust-shaped valid cash-flow batch drafts, pass the parsed batch result
   into the follow-up provider request, and preserve the tool's no-persistence
   behavior. Focused runtime AI tests and full repository check passed.
+- `pr5-runtime-ai-import-csv-tool`: verification passed. The standalone TS
+  runtime now proves `/api/v1/ai/chat/stream` can execute `import_csv` through
+  the real CSV parse seam, expose only the allowed CSV tool, stream detected
+  headers/sample rows/applied mappings, pass the parsed mapping result into the
+  follow-up provider request, and preserve the tool's no-import/no-persistence
+  behavior. Focused runtime AI tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
