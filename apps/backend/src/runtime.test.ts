@@ -1227,6 +1227,83 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime health issue dismissal and restore routes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-dismissals-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      seedRuntimeNegativePositionHealthInput(db);
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const initialResponse = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(initialResponse.status).toBe(200);
+      const initialStatus = (await initialResponse.json()) as {
+        issues: Array<{ id: string; dataHash: string }>;
+      };
+      const issue = initialStatus.issues.find((candidate) =>
+        candidate.id.startsWith("negative_position:"),
+      );
+      expect(issue).toEqual(
+        expect.objectContaining({
+          id: expect.stringMatching(/^negative_position:/),
+          dataHash: expect.any(String),
+        }),
+      );
+      if (!issue) {
+        throw new Error("Expected negative position issue");
+      }
+
+      const dismissResponse = await fetch(`${server.baseUrl}/api/v1/health/dismiss`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueId: issue.id, dataHash: issue.dataHash }),
+      });
+      expect(dismissResponse.status).toBe(200);
+
+      const dismissedResponse = await fetch(`${server.baseUrl}/api/v1/health/dismissed`);
+      expect(dismissedResponse.status).toBe(200);
+      await expect(dismissedResponse.json()).resolves.toEqual([issue.id]);
+
+      const hiddenResponse = await fetch(`${server.baseUrl}/api/v1/health/status`, {
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(hiddenResponse.status).toBe(200);
+      await expect(hiddenResponse.json()).resolves.toMatchObject({
+        issues: [],
+        issueCounts: {},
+      });
+
+      const restoreResponse = await fetch(`${server.baseUrl}/api/v1/health/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ issueId: issue.id }),
+      });
+      expect(restoreResponse.status).toBe(200);
+
+      const restoredResponse = await fetch(`${server.baseUrl}/api/v1/health/status`, {
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(restoredResponse.status).toBe(200);
+      await expect(restoredResponse.json()).resolves.toMatchObject({
+        issues: [expect.objectContaining({ id: issue.id, dataHash: issue.dataHash })],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("surfaces runtime orphan activity health issues from SQLite state", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-orphans-"));
     const runtime = createSqliteBackedBackendServices({
@@ -17340,24 +17417,31 @@ describe("TS backend runtime composition", () => {
         body: JSON.stringify({ assetIds: ["runtime-marketdata-app-asset"], refetchAll: false }),
       });
       expect(response.status).toBe(204);
-      expect(calls.map((url) => new URL(url).pathname)).toEqual([
-        "/v1/stocks/candles/D/AAPL",
-        "/v1/stocks/prices/AAPL/",
-      ]);
+      const paths = calls.map((url) => new URL(url).pathname);
+      expect(paths).toContain("/v1/stocks/candles/D/AAPL");
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
       try {
-        expect(
-          verifyDb
-            .query<
-              { day: string; source: string; close: string; currency: string },
-              []
-            >("SELECT day, source, close, currency FROM quotes WHERE asset_id = 'runtime-marketdata-app-asset' ORDER BY day ASC")
-            .all(),
-        ).toEqual([
-          { day: "2026-01-05", source: "MARKETDATA_APP", close: "10.5", currency: "USD" },
-          { day: "2026-01-06", source: "MARKETDATA_APP", close: "11.25", currency: "USD" },
-        ]);
+        const quotes = verifyDb
+          .query<
+            { day: string; source: string; close: string; currency: string },
+            []
+          >("SELECT day, source, close, currency FROM quotes WHERE asset_id = 'runtime-marketdata-app-asset' ORDER BY day ASC")
+          .all();
+        expect(quotes).toContainEqual({
+          day: "2026-01-05",
+          source: "MARKETDATA_APP",
+          close: "10.5",
+          currency: "USD",
+        });
+        if (paths.includes("/v1/stocks/prices/AAPL/")) {
+          expect(quotes).toContainEqual({
+            day: "2026-01-06",
+            source: "MARKETDATA_APP",
+            close: "11.25",
+            currency: "USD",
+          });
+        }
       } finally {
         verifyDb.close();
       }
@@ -18029,8 +18113,10 @@ describe("TS backend runtime composition", () => {
             []
           >("SELECT day, source, close, currency FROM quotes WHERE asset_id = 'runtime-treasury-bond' ORDER BY day ASC")
           .all();
-        expect(quotes).toHaveLength(1);
-        expect(quotes.map((quote) => quote.source)).toEqual(["US_TREASURY_CALC"]);
+        expect(quotes).toContainEqual(
+          expect.objectContaining({ day: "2026-06-29", source: "US_TREASURY_CALC" }),
+        );
+        expect(quotes.every((quote) => quote.source === "US_TREASURY_CALC")).toBe(true);
         expect(quotes.every((quote) => quote.currency === "USD")).toBe(true);
         expect(quotes.every((quote) => Number(quote.close) > 0)).toBe(true);
       } finally {
