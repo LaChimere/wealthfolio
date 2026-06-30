@@ -7489,6 +7489,12 @@ contract:
   year-independent `TOTAL` period instead of `YTD`, keeping the seeded dividend
   assertion stable across calendar years. Focused runtime AI tests and full
   repository check passed.
+- `pr5-runtime-ai-performance-tool`: verification passed. The standalone TS
+  runtime now proves `/api/v1/ai/chat/stream` can execute `get_performance`
+  against persisted TOTAL valuation rows, expose only the allowed performance
+  tool, stream gain/loss and simple-return payloads, and pass the parsed
+  performance result into the follow-up provider request. Focused runtime AI
+  tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

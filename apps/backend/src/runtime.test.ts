@@ -3182,6 +3182,124 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat performance tool results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-performance-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeValuation(seedDb, {
+          accountId: "TOTAL",
+          date: "2026-01-01",
+          totalValue: "100",
+          fxRateToBase: "1",
+          netContribution: "100",
+          investmentMarketValue: "100",
+          costBasis: "100",
+        });
+        seedRuntimeValuation(seedDb, {
+          accountId: "TOTAL",
+          date: "2026-01-03",
+          totalValue: "115",
+          fxRateToBase: "1",
+          netContribution: "100",
+          investmentMarketValue: "115",
+          costBasis: "100",
+        });
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["get_performance"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            '{"message":{"tool_calls":[{"id":"runtime-performance-call","function":{"name":"get_performance","arguments":{"accountId":"TOTAL","period":"ALL"}}}]},"done":false}\n{"done":true}\n',
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response(
+          '{"message":{"content":"Performance loaded."},"done":false}\n{"done":true}\n',
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Show performance" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      ).map((tool) => tool.function?.name);
+      expect(exposedToolNames).toEqual(["get_performance"]);
+      expect(JSON.stringify(events)).toContain('"gainLossAmount":15');
+      expect(JSON.stringify(events)).toContain('"simpleReturn":0.15');
+      const performanceToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(performanceToolMessage?.content))).toMatchObject({
+        id: "TOTAL",
+        periodStartDate: "2026-01-01",
+        periodEndDate: "2026-01-03",
+        currency: "USD",
+        gainLossAmount: 15,
+        simpleReturn: 0.15,
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({
@@ -24865,6 +24983,9 @@ function seedRuntimeValuation(
     date: string;
     totalValue: string;
     fxRateToBase: string;
+    netContribution?: string;
+    investmentMarketValue?: string;
+    costBasis?: string;
   },
 ): void {
   db.prepare(
@@ -24874,14 +24995,17 @@ function seedRuntimeValuation(
         fx_rate_to_base, cash_balance, investment_market_value, total_value,
         cost_basis, net_contribution, calculated_at
       )
-      VALUES (?, ?, ?, 'USD', 'USD', ?, '0', '0', ?, '0', '0', ?)
+      VALUES (?, ?, ?, 'USD', 'USD', ?, '0', ?, ?, ?, ?, ?)
     `,
   ).run(
     `${valuation.accountId}_${valuation.date}`,
     valuation.accountId,
     valuation.date,
     valuation.fxRateToBase,
+    valuation.investmentMarketValue ?? "0",
     valuation.totalValue,
+    valuation.costBasis ?? "0",
+    valuation.netContribution ?? "0",
     `${valuation.date}T00:00:00Z`,
   );
 }

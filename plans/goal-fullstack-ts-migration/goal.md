@@ -8,7 +8,7 @@ turns_used: 1073
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T17:25:24+09:00"
+updated_at: "2026-06-30T17:37:10+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5940,6 +5940,12 @@ updated_at: "2026-06-30T17:25:24+09:00"
   `get_income` stream smoke now requests the year-independent `TOTAL` period
   instead of `YTD`, keeping the seeded dividend assertion stable across calendar
   years. Focused runtime AI tests and full repository check passed.
+- Turn 1074: Added runtime AI `get_performance` tool execution evidence. The
+  standalone TS runtime now proves `/api/v1/ai/chat/stream` can execute
+  `get_performance` against persisted TOTAL daily valuations, expose only the
+  allowed performance tool, stream gain/loss and simple-return payloads, and
+  pass the parsed performance result into the follow-up provider request.
+  Focused runtime AI tests and full repository check passed.
 
 ## Deferred items
 
