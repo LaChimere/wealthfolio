@@ -1210,8 +1210,11 @@ describe("TS backend runtime composition", () => {
         issues: [
           expect.objectContaining({
             id: expect.stringMatching(/^negative_position:/),
+            severity: "WARNING",
             category: "DATA_CONSISTENCY",
             title: "Holding has negative quantity",
+            message:
+              "Some holdings show negative quantities, which usually indicates missing or incorrect transactions.",
             affectedCount: 1,
             navigateAction: {
               route: "/holdings",
