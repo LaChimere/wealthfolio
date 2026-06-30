@@ -17397,6 +17397,105 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data sync route skipped reasons to event payloads", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-market-sync-skip-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() => {
+        throw new Error("fetch should not be called for unsupported preferred providers");
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const events: Array<{ name: string; payload?: unknown }> = [];
+    const portfolioJobConfigs: PortfolioJobConfig[] = [];
+    const originalPortfolioJobService = runtime.options.portfolioJobService;
+    if (!originalPortfolioJobService) {
+      throw new Error("Runtime market-data skip route test requires portfolio job service");
+    }
+    runtime.options.portfolioJobService = {
+      enqueuePortfolioJob(jobConfig) {
+        portfolioJobConfigs.push(jobConfig);
+        return originalPortfolioJobService.enqueuePortfolioJob(jobConfig);
+      },
+    };
+    const unsubscribe = runtime.options.eventBus?.subscribe((event) => {
+      events.push(event);
+    });
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeAsset(seedDb, "runtime-market-sync-skip-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "UNSUPPORTED",
+            "UNSUPPORTED",
+            "XNAS",
+            JSON.stringify({ preferred_provider: "legacy_provider" }),
+            "runtime-market-sync-skip-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assetIds: ["runtime-market-sync-skip-asset"],
+          refetchAll: false,
+        }),
+      });
+      expect(response.status).toBe(204);
+      await waitForEventCount(
+        events.map((event) => event.name),
+        "portfolio:update-complete",
+        1,
+      );
+      expect(portfolioJobConfigs).toEqual([
+        {
+          accountIds: null,
+          marketSyncMode: { type: "incremental", asset_ids: ["runtime-market-sync-skip-asset"] },
+          snapshotMode: "incremental_from_last",
+          valuationMode: "incremental_from_last",
+          sinceDate: null,
+        },
+      ]);
+      expect(events.find((event) => event.name === "market:sync-complete")?.payload).toEqual({
+        failed_syncs: [],
+        skipped_reasons: [
+          [
+            "runtime-market-sync-skip-asset",
+            "Provider not supported for market sync: LEGACY_PROVIDER",
+          ],
+        ],
+      });
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { count: number },
+              []
+            >("SELECT COUNT(*) AS count FROM quotes WHERE asset_id = 'runtime-market-sync-skip-asset'")
+            .get()?.count,
+        ).toBe(0);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      unsubscribe?.();
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to fall back from OpenFIGI to Yahoo quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-openfigi-fallback-route-"),
