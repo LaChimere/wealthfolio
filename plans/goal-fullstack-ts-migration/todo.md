@@ -7526,6 +7526,12 @@ contract:
   headers/sample rows/applied mappings, pass the parsed mapping result into the
   follow-up provider request, and preserve the tool's no-import/no-persistence
   behavior. Focused runtime AI tests and full repository check passed.
+- `pr5-runtime-ai-draft-import-dual-review`: verification passed. Claude Opus
+  4.8 xhigh and GPT-5.5 xhigh reviewed `record_activity`, `record_activities`,
+  and `import_csv` runtime stream evidence and found no actionable issues in
+  tool execution proof, provider follow-up assertions, fixture validity,
+  cleanup, allowlist filtering, no-persistence assertions, or plan/todo
+  consistency.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
