@@ -3139,7 +3139,7 @@ describe("TS backend runtime composition", () => {
         providerBodies.push(body);
         if (providerBodies.length === 1) {
           return new Response(
-            '{"message":{"tool_calls":[{"id":"runtime-income-call","function":{"name":"get_income","arguments":{"period":"YTD"}}}]},"done":false}\n{"done":true}\n',
+            '{"message":{"tool_calls":[{"id":"runtime-income-call","function":{"name":"get_income","arguments":{"period":"TOTAL"}}}]},"done":false}\n{"done":true}\n',
             { headers: { "content-type": "application/x-ndjson" } },
           );
         }
@@ -3173,7 +3173,7 @@ describe("TS backend runtime composition", () => {
       ).find((message) => message.role === "tool");
       expect(JSON.parse(String(incomeToolMessage?.content))).toMatchObject({
         totalIncome: 12,
-        period: "YTD",
+        period: "TOTAL",
       });
     } finally {
       globalThis.fetch = originalFetch;
