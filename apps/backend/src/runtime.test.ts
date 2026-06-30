@@ -3300,6 +3300,142 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat valuation history tool results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-valuation-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO accounts (
+                id, name, account_type, "group", currency, is_default, is_active,
+                is_archived, tracking_mode
+              )
+              VALUES
+                ('ai-val-a', 'AI Valuation A', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
+                ('ai-val-b', 'AI Valuation B', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+            `,
+          )
+          .run();
+        seedRuntimeValuation(seedDb, {
+          accountId: "ai-val-a",
+          date: "2026-01-01",
+          totalValue: "100",
+          fxRateToBase: "1",
+          netContribution: "40",
+        });
+        seedRuntimeValuation(seedDb, {
+          accountId: "ai-val-b",
+          date: "2026-01-01",
+          totalValue: "200",
+          fxRateToBase: "2",
+          netContribution: "80",
+        });
+        seedRuntimeValuation(seedDb, {
+          accountId: "ai-val-a",
+          date: "2026-01-02",
+          totalValue: "150",
+          fxRateToBase: "1",
+          netContribution: "50",
+        });
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["get_valuation_history"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            '{"message":{"tool_calls":[{"id":"runtime-valuation-call","function":{"name":"get_valuation_history","arguments":{"accountId":"TOTAL","startDate":"2026-01-01","endDate":"2026-01-02"}}}]},"done":false}\n{"done":true}\n',
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response(
+          '{"message":{"content":"Valuations loaded."},"done":false}\n{"done":true}\n',
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Show valuation history" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      ).map((tool) => tool.function?.name);
+      expect(exposedToolNames).toEqual(["get_valuation_history"]);
+      expect(JSON.stringify(events)).toContain('"totalValue":500');
+      expect(JSON.stringify(events)).toContain('"netContribution":200');
+      const valuationToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(valuationToolMessage?.content))).toMatchObject({
+        accountScope: "TOTAL",
+        currency: "USD",
+        startDate: "2026-01-01",
+        endDate: "2026-01-02",
+        valuations: [
+          { date: "2026-01-01", totalValue: 500, netContribution: 200, currency: "USD" },
+          { date: "2026-01-02", totalValue: 150, netContribution: 50, currency: "USD" },
+        ],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({

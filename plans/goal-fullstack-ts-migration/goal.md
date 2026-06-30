@@ -8,7 +8,7 @@ turns_used: 1073
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T17:37:10+09:00"
+updated_at: "2026-06-30T17:45:18+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5946,6 +5946,12 @@ updated_at: "2026-06-30T17:37:10+09:00"
   allowed performance tool, stream gain/loss and simple-return payloads, and
   pass the parsed performance result into the follow-up provider request.
   Focused runtime AI tests and full repository check passed.
+- Turn 1075: Added runtime AI `get_valuation_history` tool execution evidence.
+  The standalone TS runtime now proves `/api/v1/ai/chat/stream` can aggregate
+  persisted active-account valuation rows for `TOTAL`, apply FX-to-base totals,
+  expose only the allowed valuation-history tool, stream the valuation payload,
+  and pass the parsed result into the follow-up provider request. Focused
+  runtime AI tests and full repository check passed.
 
 ## Deferred items
 
