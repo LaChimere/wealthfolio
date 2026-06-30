@@ -7598,6 +7598,11 @@ contract:
   an old flow targets and conditionally clears only that original device instead
   of re-reading and deleting a later registered device. Focused
   pairing/concurrency tests and full repository check passed.
+- `pr5-device-flow-approve-poll-device-binding`: verification passed.
+  `approvePairingOverwrite` and `getPairingFlowState` now use the original flow
+  device for remote snapshot checks instead of the current `sync_identity`,
+  preserving old flow cancellability after a later device registration. Focused
+  pairing/concurrency tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

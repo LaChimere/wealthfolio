@@ -803,11 +803,7 @@ export function createLocalDeviceSyncService({
       }
       if (flow.phase.phase === "syncing" && flow.phase.detail === "waiting_snapshot") {
         try {
-          const { accessToken, deviceId } =
-            await requireCompositePairingPrerequisitesWithTokenOrDisabled(
-              connectService,
-              secretService,
-            );
+          const accessToken = await restoreAccessTokenOrDisabled(connectService);
           if (bootstrapSnapshot) {
             const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
             const phase = pairingBootstrapPhase(bootstrap);
@@ -825,7 +821,7 @@ export function createLocalDeviceSyncService({
               accessToken,
               env,
               fetchImpl,
-              deviceId,
+              flow.deviceId,
               db,
             );
             if (bootstrapWait.waiting) {
@@ -861,11 +857,7 @@ export function createLocalDeviceSyncService({
           500,
         );
       }
-      const { accessToken, deviceId } =
-        await requireCompositePairingPrerequisitesWithTokenOrDisabled(
-          connectService,
-          secretService,
-        );
+      const accessToken = await restoreAccessTokenOrDisabled(connectService);
       pairingOverwriteApprovals.add(flow.pairingId);
       try {
         if (bootstrapSnapshot) {
@@ -885,7 +877,7 @@ export function createLocalDeviceSyncService({
             accessToken,
             env,
             fetchImpl,
-            deviceId,
+            flow.deviceId,
             db,
           );
           if (bootstrapWait.waiting) {
