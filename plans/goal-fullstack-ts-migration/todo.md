@@ -7687,6 +7687,12 @@ contract:
   map across entries, and preserve atomic writes plus FX-pair preflight
   behavior. Focused activity unit/runtime tests and full repository check
   passed.
+- `pr5-bulk-activity-provider-recompute-review-fix`: verification passed. Review
+  found the new bulk update stale-recompute branch was claimed but not directly
+  tested; focused activity coverage now mutates transfer disposition-driving
+  fields during provider lookup and expects bulk validation to fail per-entry
+  instead of creating an asset from stale pre-await data. Focused bulk activity
+  tests and backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

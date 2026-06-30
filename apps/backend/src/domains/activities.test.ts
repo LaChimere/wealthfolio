@@ -4569,6 +4569,84 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("recomputes bulk update provider resolution after concurrent disposition changes", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: (query) => {
+        calls.push(query);
+        db.prepare(
+          "UPDATE activities SET quantity = NULL, unit_price = NULL WHERE id = 'bulk-transfer-race'",
+        ).run();
+        return [
+          {
+            symbol: "SHOP",
+            shortName: "Shopify Provider",
+            longName: "Shopify Provider",
+            exchange: "NYSE",
+            exchangeMic: "XNYS",
+            exchangeName: "NYSE",
+            quoteType: "EQUITY",
+            typeDisplay: "",
+            currency: "USD",
+            dataSource: "FINNHUB",
+            isExisting: false,
+            index: "",
+            score: 1,
+          },
+        ];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertActivity(db, {
+        id: "bulk-transfer-race",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        quantity: "2",
+        amount: null,
+        currency: "USD",
+      });
+
+      const result = (await service.bulkMutateActivities?.({
+        updates: [
+          {
+            id: "bulk-transfer-race",
+            accountId: "account-1",
+            asset: { symbol: "SHOP" },
+            activityType: "TRANSFER_IN",
+            activityDate: "2025-01-18",
+            currency: "USD",
+          },
+        ],
+      })) as ActivityBulkMutationResult;
+
+      expect(result).toMatchObject({
+        created: [],
+        updated: [],
+        deleted: [],
+        createdMappings: [],
+        errors: [
+          {
+            id: "bulk-transfer-race",
+            action: "update",
+            message: "Quote currency is required. Please re-select the symbol.",
+          },
+        ],
+      });
+      expect(readAssetCount(db)).toBe(0);
+      expect(calls).toEqual(["SHOP"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures bulk activity FX pairs before writes", async () => {
     const db = createActivitiesDb();
 

@@ -6132,6 +6132,12 @@ updated_at: "2026-07-01T00:39:21+09:00"
   direct provider-resolution seam before bulk preparation, including cached
   symbol search and stale-update recomputation, while preserving atomic bulk
   writes. Focused activity unit/runtime tests and full repository check passed.
+- Turn 1112: Addressed bulk provider-resolution review feedback. Added focused
+  coverage for the bulk update stale-recompute branch by mutating
+  disposition-driving transfer fields during provider lookup and asserting the
+  bulk result records a per-entry validation error instead of creating an asset
+  from stale pre-await data. Focused bulk activity tests and backend type-check
+  passed.
 
 ## Deferred items
 
