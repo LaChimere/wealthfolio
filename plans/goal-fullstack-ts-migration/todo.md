@@ -7228,6 +7228,12 @@ contract:
   payloads plus unknown/missing actions, proving Rust-shaped 400/404 errors
   occur before market data, FX, or taxonomy side effects. Full runtime suite and
   full repository check passed.
+- `pr5-market-sync-event-payload-runtime`: verification passed. Runtime
+  portfolio jobs triggered by `/api/v1/settings` base-currency changes and
+  `/api/v1/market-data/sync` now have coverage proving `market:sync-complete`
+  publishes the Rust-shaped `{ failed_syncs, skipped_reasons }` payload through
+  the event bus while preserving portfolio job execution. Full runtime suite and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
