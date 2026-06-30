@@ -4786,7 +4786,7 @@ describe("TS backend runtime composition", () => {
     }
   });
 
-  test("wires runtime Connect trigger-cycle route to push pending outbox", async () => {
+  test("wires runtime Connect trigger-cycle route to push pending outbox for unknown reconcile actions", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-trigger-push-"));
     const rootKey = Buffer.alloc(32, 7).toString("base64");
     const deviceSyncRequests: string[] = [];
@@ -4804,7 +4804,7 @@ describe("TS backend runtime composition", () => {
         }
         deviceSyncRequests.push(url);
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "NOOP" });
+          return Response.json({ action: "FUTURE_ACTION", cursor: 7 });
         }
         if (url.endsWith("/api/v1/sync/events/push")) {
           pushBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
