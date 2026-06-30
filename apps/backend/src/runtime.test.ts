@@ -18301,6 +18301,142 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("wires runtime market-data backfill to general custom provider history", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-general-custom-history-route-"),
+    );
+    const requests: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input: RequestInfo | URL) => {
+        const url = String(input);
+        requests.push(url);
+        if (url !== "https://prices.example.test/history/FUND.TO") {
+          throw new Error(`unexpected market data fetch: ${url}`);
+        }
+        return Promise.resolve(
+          Response.json({
+            rows: [
+              { price: "30.75", date: "2026-06-28", currency: "CAD" },
+              { price: "31.25", date: "2026-06-29", currency: "CAD" },
+            ],
+          }),
+        );
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO market_data_custom_providers (
+                id, code, name, description, enabled, priority, config, created_at, updated_at
+              )
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+          )
+          .run(
+            "runtime-general-custom-history-provider-id",
+            "general-history",
+            "General History Feed",
+            "Runtime general history feed",
+            1,
+            7,
+            JSON.stringify({
+              sources: [
+                {
+                  kind: "historical",
+                  format: "json",
+                  url: "https://prices.example.test/history/{SYMBOL}",
+                  pricePath: "$.rows[*].price",
+                  datePath: "$.rows[*].date",
+                  currencyPath: "$.rows[*].currency",
+                },
+              ],
+            }),
+            "2026-05-14T00:00:00Z",
+            "2026-05-14T00:00:00Z",
+          );
+        seedRuntimeAsset(seedDb, "runtime-general-history-sync-asset");
+        seedDb
+          .prepare(
+            "UPDATE assets SET display_code = ?, quote_ccy = ?, instrument_symbol = ?, instrument_exchange_mic = ?, provider_config = ? WHERE id = ?",
+          )
+          .run(
+            "FUND",
+            "CAD",
+            "FUND",
+            "XTSE",
+            JSON.stringify({
+              preferred_provider: "CUSTOM_SCRAPER",
+              overrides: {
+                "CUSTOM:general-history": { type: "equity_symbol", symbol: "FUND.TO" },
+              },
+            }),
+            "runtime-general-history-sync-asset",
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const response = await fetch(`${server.baseUrl}/api/v1/market-data/sync`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          assetIds: ["runtime-general-history-sync-asset"],
+          refetchAll: true,
+        }),
+      });
+      expect(response.status).toBe(204);
+      expect(requests).toEqual(["https://prices.example.test/history/FUND.TO"]);
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        expect(
+          verifyDb
+            .query<
+              { day: string; source: string; close: string; currency: string; data_source: string },
+              []
+            >(
+              `
+                SELECT q.day, q.source, q.close, q.currency, s.data_source
+                FROM quotes q
+                JOIN quote_sync_state s ON s.asset_id = q.asset_id
+                WHERE q.asset_id = 'runtime-general-history-sync-asset'
+                ORDER BY q.day ASC
+              `,
+            )
+            .all(),
+        ).toEqual([
+          {
+            day: "2026-06-28",
+            source: "CUSTOM_SCRAPER:general-history",
+            close: "30.75",
+            currency: "CAD",
+            data_source: "CUSTOM_SCRAPER:general-history",
+          },
+          {
+            day: "2026-06-29",
+            source: "CUSTOM_SCRAPER:general-history",
+            close: "31.25",
+            currency: "CAD",
+            data_source: "CUSTOM_SCRAPER:general-history",
+          },
+        ]);
+      } finally {
+        verifyDb.close();
+      }
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime market-data sync route to MarketData.app provider quotes", async () => {
     const appDataDir = mkdtempSync(
       path.join(tmpdir(), "wealthfolio-runtime-marketdata-app-route-"),
