@@ -7400,6 +7400,11 @@ contract:
   injected portfolio service for holdings, allocations, and income summary query
   routes instead of hitting the optional-service guard. Focused runtime tests
   and full repository check passed.
+- `pr5-runtime-contribution-deposit-route`: verification passed. The
+  SQLite-backed runtime now proves `/api/v1/limits/{id}/deposits` uses the
+  composed contribution deposit calculator with base-currency settings and
+  posted activity reads instead of hitting the optional calculator guard.
+  Focused runtime test and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
