@@ -723,7 +723,10 @@ describe("TS local device sync service", () => {
       snapshotMissing = false;
       await expect(service.getPairingFlowState?.({ flowId })).resolves.toEqual({
         flowId,
-        phase: { phase: "error", message: "Device sync feature is disabled in this build." },
+        phase: {
+          phase: "error",
+          message: "Bootstrap snapshot application is not configured for pairing bootstrap.",
+        },
       });
       await expect(service.getPairingFlowState?.({ flowId })).rejects.toMatchObject({
         code: "internal_error",
@@ -992,7 +995,11 @@ describe("TS local device sync service", () => {
           proof: "proof",
           allowOverwrite: true,
         }),
-      ).rejects.toThrow("Device sync feature is disabled in this build.");
+      ).rejects.toMatchObject({
+        code: "internal_error",
+        message: "Bootstrap snapshot application is not configured for pairing bootstrap.",
+        status: 500,
+      });
 
       snapshotResponse = {
         snapshot_id: "snapshot-1",

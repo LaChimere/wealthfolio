@@ -153,6 +153,8 @@ const WAITING_FOR_TRUSTED_SNAPSHOT_MESSAGE =
   "Snapshot is not available yet. Waiting for upload from a trusted device.";
 const WAITING_FOR_FRESH_SNAPSHOT_MESSAGE =
   "Waiting for a snapshot generated after pairing confirmation";
+const BOOTSTRAP_SNAPSHOT_NOT_CONFIGURED_MESSAGE =
+  "Bootstrap snapshot application is not configured for pairing bootstrap.";
 const MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -664,7 +666,7 @@ export function createLocalDeviceSyncService({
             nonEmptyTables: null,
           };
         }
-        throw deviceSyncDisabled();
+        throw bootstrapSnapshotNotConfigured();
       }
       const bootstrap = await runPairingBootstrapSnapshot(bootstrapSnapshot);
       if (bootstrap.status === "requested") {
@@ -773,7 +775,7 @@ export function createLocalDeviceSyncService({
           return { flowId, phase };
         }
       }
-      throw deviceSyncDisabled();
+      throw bootstrapSnapshotNotConfigured();
     },
     async getPairingFlowState(request) {
       const flow = pairingFlows.get(request.flowId);
@@ -810,7 +812,7 @@ export function createLocalDeviceSyncService({
             if (bootstrapWait.waiting) {
               return { flowId: request.flowId, phase: flow.phase };
             }
-            const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+            const phase = { phase: "error", message: BOOTSTRAP_SNAPSHOT_NOT_CONFIGURED_MESSAGE };
             pairingFlows.delete(request.flowId);
             pairingOverwriteApprovals.delete(flow.pairingId);
             return { flowId: request.flowId, phase };
@@ -872,7 +874,7 @@ export function createLocalDeviceSyncService({
             pairingFlows.set(request.flowId, { ...flow, phase });
             return { flowId: request.flowId, phase };
           }
-          const phase = { phase: "error", message: DEVICE_SYNC_DISABLED_MESSAGE };
+          const phase = { phase: "error", message: BOOTSTRAP_SNAPSHOT_NOT_CONFIGURED_MESSAGE };
           pairingFlows.delete(request.flowId);
           pairingOverwriteApprovals.delete(flow.pairingId);
           return { flowId: request.flowId, phase };
@@ -2735,7 +2737,7 @@ async function runPairingBootstrapSnapshot(
   bootstrapSnapshot: (() => Promise<unknown> | unknown) | undefined,
 ): Promise<Record<string, unknown>> {
   if (!bootstrapSnapshot) {
-    throw deviceSyncDisabled();
+    throw bootstrapSnapshotNotConfigured();
   }
   const result = await Promise.resolve(bootstrapSnapshot());
   if (!isRecord(result)) {
@@ -3074,4 +3076,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function deviceSyncDisabled(): DeviceSyncNotImplementedError {
   return new DeviceSyncNotImplementedError(DEVICE_SYNC_DISABLED_MESSAGE);
+}
+
+function bootstrapSnapshotNotConfigured(): DeviceSyncServiceError {
+  return new DeviceSyncServiceError(
+    "internal_error",
+    BOOTSTRAP_SNAPSHOT_NOT_CONFIGURED_MESSAGE,
+    500,
+  );
 }
