@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1035
+turns_used: 1036
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T12:02:22+09:00"
+updated_at: "2026-06-30T12:07:07+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5755,6 +5755,11 @@ updated_at: "2026-06-30T12:02:22+09:00"
   market/broker event and add-on permission slices with Claude Opus 4.8 xhigh
   and GPT-5.5 xhigh. Both reviews found no actionable correctness,
   compatibility, security, or test-validity issues.
+- Turn 1036: Cleaned data-export required-service parity. The TS data export
+  service now requires goal and valuation providers at construction time instead
+  of exposing stale success-shaped “service not available” branches for goals
+  and portfolio-history exports. Focused data-export/runtime tests, backend
+  type-check, and full repository check passed.
 
 ## Deferred items
 

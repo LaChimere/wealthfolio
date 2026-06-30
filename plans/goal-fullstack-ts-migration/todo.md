@@ -7307,6 +7307,11 @@ contract:
   and GPT-5.5 xhigh reviewed the recent market/broker event and add-on
   permission slices and found no actionable correctness, compatibility,
   security, or test-validity issues.
+- `pr5-data-export-required-services`: verification passed. The TS data export
+  service now requires goal and valuation providers at construction time instead
+  of exposing stale “service not available” branches for goals and
+  portfolio-history exports. Focused data-export/runtime tests, backend
+  type-check, and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
