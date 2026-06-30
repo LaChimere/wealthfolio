@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1067
+turns_used: 1068
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T16:33:51+09:00"
+updated_at: "2026-06-30T16:38:44+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5909,6 +5909,11 @@ updated_at: "2026-06-30T16:33:51+09:00"
   standalone TS runtime now proves `/api/v1/ai/chat/stream` can execute the
   injected `get_goals` tool against persisted runtime goal data, stream the tool
   call/result/text sequence, and pass the goal result into the follow-up
+  provider request. Focused runtime AI tests and full repository check passed.
+- Turn 1068: Added runtime AI `get_health_status` tool execution evidence. The
+  standalone TS runtime now proves `/api/v1/ai/chat/stream` can execute the
+  injected health-status tool against the composed runtime health service,
+  stream the not-computed health payload, and pass it into the follow-up
   provider request. Focused runtime AI tests and full repository check passed.
 
 ## Deferred items

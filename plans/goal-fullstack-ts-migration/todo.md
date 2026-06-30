@@ -7459,6 +7459,11 @@ contract:
   `get_goals` tool against persisted runtime goal data, stream the tool
   call/result/text sequence, and pass the goal result into the follow-up
   provider request. Focused runtime AI tests and full repository check passed.
+- `pr5-runtime-ai-health-status-tool`: verification passed. The standalone TS
+  runtime now proves `/api/v1/ai/chat/stream` can execute the injected
+  health-status tool against the composed runtime health service, stream the
+  not-computed health payload, and pass it into the follow-up provider request.
+  Focused runtime AI tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
