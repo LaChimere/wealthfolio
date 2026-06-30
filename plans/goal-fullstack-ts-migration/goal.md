@@ -6179,6 +6179,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   canonical exchange MIC, provider ID, provider symbol, quote mode, manual data
   source handling, and Yahoo-suffixed equity display symbols. Full market-data
   tests and full repository check passed.
+- Turn 1121: Improved Connect cloud failure traceability. Public and
+  authenticated Connect API failures now include a generated client request ID
+  and safe server request ID metadata in error messages, while unsafe server
+  request IDs remain suppressed and outbound requests only send the client
+  request header. Full Connect tests and full repository check passed.
 
 ## Deferred items
 

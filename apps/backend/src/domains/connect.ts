@@ -173,6 +173,8 @@ const CLOUD_REFRESH_TOKEN_KEY = "sync_refresh_token";
 const CLOUD_ACCESS_TOKEN_KEY = "sync_access_token";
 const DEVICE_SYNC_IDENTITY_KEY = "sync_identity";
 const DEVICE_SYNC_DEVICE_ID_KEY = "sync_device_id";
+const CLIENT_REQUEST_ID_HEADER = "x-wf-client-request-id";
+const SERVER_REQUEST_ID_HEADER = "x-request-id";
 const DEFAULT_CONNECT_AUTH_URL = "https://auth.wealthfolio.app";
 const DEFAULT_CONNECT_AUTH_PUBLISHABLE_KEY = "sb_publishable_ZSZbXNtWtnh9i2nqJ2UL4A_NV8ZVutd";
 const DEFAULT_CONNECT_API_URL = "https://api.wealthfolio.app";
@@ -752,14 +754,19 @@ async function fetchPublicSubscriptionPlans(
 ): Promise<unknown> {
   const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
   const url = `${baseUrl}/api/v1/subscription/plans`;
+  const clientRequestId = connectClientRequestId();
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: "GET",
-      headers: connectRequestHeaders(),
+      headers: connectRequestHeaders(clientRequestId),
     });
   } catch (error) {
-    throw new ConnectServiceError("internal_error", `Request failed: ${errorMessage(error)}`, 500);
+    throw new ConnectServiceError(
+      "internal_error",
+      `Request failed: ${errorMessage(error)} (${connectRequestMetadataSuffix(clientRequestId)})`,
+      500,
+    );
   }
 
   let bodyText: string;
@@ -768,12 +775,22 @@ async function fetchPublicSubscriptionPlans(
   } catch (error) {
     throw new ConnectServiceError(
       "internal_error",
-      `Failed to read response: ${errorMessage(error)}`,
+      `Failed to read response: ${errorMessage(error)} (${connectRequestMetadataSuffix(
+        clientRequestId,
+        connectServerRequestId(response.headers),
+      )})`,
       500,
     );
   }
   if (!response.ok) {
-    throw new ConnectServiceError("internal_error", `API error ${response.status}`, 500);
+    throw new ConnectServiceError(
+      "internal_error",
+      `API error ${response.status} (${connectRequestMetadataSuffix(
+        clientRequestId,
+        connectServerRequestId(response.headers),
+      )})`,
+      500,
+    );
   }
   try {
     const parsed = JSON.parse(bodyText) as unknown;
@@ -808,17 +825,22 @@ async function fetchConnectJsonWithAccessTokenRaw(
 ): Promise<{ value: unknown; bodyText: string }> {
   const baseUrl = normalizeConnectApiUrl(env.CONNECT_API_URL);
   const url = `${baseUrl}${path}`;
+  const clientRequestId = connectClientRequestId();
   let response: Response;
   try {
     response = await fetchImpl(url, {
       method: "GET",
       headers: {
         authorization: `Bearer ${accessToken}`,
-        ...connectRequestHeaders(),
+        ...connectRequestHeaders(clientRequestId),
       },
     });
   } catch (error) {
-    throw new ConnectServiceError("internal_error", `Request failed: ${errorMessage(error)}`, 500);
+    throw new ConnectServiceError(
+      "internal_error",
+      `Request failed: ${errorMessage(error)} (${connectRequestMetadataSuffix(clientRequestId)})`,
+      500,
+    );
   }
 
   let bodyText: string;
@@ -827,14 +849,21 @@ async function fetchConnectJsonWithAccessTokenRaw(
   } catch (error) {
     throw new ConnectServiceError(
       "internal_error",
-      `Failed to read response: ${errorMessage(error)}`,
+      `Failed to read response: ${errorMessage(error)} (${connectRequestMetadataSuffix(
+        clientRequestId,
+        connectServerRequestId(response.headers),
+      )})`,
       500,
     );
   }
   if (!response.ok) {
     throw new ConnectServiceError(
       "internal_error",
-      connectApiErrorMessage(response.status, bodyText),
+      connectApiErrorMessage(
+        response.status,
+        bodyText,
+        connectRequestMetadataSuffix(clientRequestId, connectServerRequestId(response.headers)),
+      ),
       500,
     );
   }
@@ -3882,24 +3911,31 @@ function validRefreshErrorResponseShape(rawJson: string, parsed: Record<string, 
   );
 }
 
-function connectApiErrorMessage(status: number, bodyText: string): string {
+function connectApiErrorMessage(
+  status: number,
+  bodyText: string,
+  metadataSuffix: string | null = null,
+): string {
   const trimmed = bodyText.trim();
   if (!trimmed) {
-    return `API error ${status}`;
+    return appendConnectRequestMetadata(`API error ${status}`, metadataSuffix);
   }
   try {
     const parsed = JSON.parse(trimmed);
     if (isRecord(parsed)) {
       if (!validConnectApiErrorResponseShape(trimmed, parsed)) {
-        return `API error ${status}`;
+        return appendConnectRequestMetadata(`API error ${status}`, metadataSuffix);
       }
       const message = optionalString(parsed.message) ?? optionalString(parsed.error);
-      return `API error ${status}: ${message ?? `HTTP ${status}`}`;
+      return appendConnectRequestMetadata(
+        `API error ${status}: ${message ?? `HTTP ${status}`}`,
+        metadataSuffix,
+      );
     }
   } catch {
-    return `API error ${status}`;
+    return appendConnectRequestMetadata(`API error ${status}`, metadataSuffix);
   }
-  return `API error ${status}`;
+  return appendConnectRequestMetadata(`API error ${status}`, metadataSuffix);
 }
 
 function validConnectApiErrorResponseShape(
@@ -3920,11 +3956,31 @@ function validConnectApiErrorResponseShape(
   );
 }
 
-function connectRequestHeaders(): Record<string, string> {
+function appendConnectRequestMetadata(message: string, metadataSuffix: string | null): string {
+  return metadataSuffix === null ? message : `${message} (${metadataSuffix})`;
+}
+
+function connectRequestHeaders(clientRequestId = connectClientRequestId()): Record<string, string> {
   return {
     "content-type": "application/json",
-    "x-wf-client-request-id": `app:${randomUUID()}`,
+    [CLIENT_REQUEST_ID_HEADER]: clientRequestId,
   };
+}
+
+function connectClientRequestId(): string {
+  return `app:${randomUUID()}`;
+}
+
+function connectServerRequestId(headers: Headers): string | null {
+  const value = headers.get(SERVER_REQUEST_ID_HEADER)?.trim();
+  return value !== undefined && isLogSafeRequestId(value) ? value : null;
+}
+
+function connectRequestMetadataSuffix(
+  clientRequestId: string,
+  serverRequestId: string | null = null,
+): string {
+  return `clientRequestId=${clientRequestId}, requestId=${serverRequestId ?? "none"}`;
 }
 
 function isSessionInvalid(status: number, message: string, code = ""): boolean {

@@ -60,6 +60,17 @@ function snapshotDownloadResponse(
   });
 }
 
+function unreadableConnectResponse(headers: HeadersInit = {}): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(headers),
+    text: async () => {
+      throw new Error("body broke");
+    },
+  } as Response;
+}
+
 function createDeviceSyncStateDb(): Database {
   const db = new Database(":memory:");
   db.exec(`
@@ -486,7 +497,10 @@ describe("TS Connect local session service", () => {
       db,
       env: { CONNECT_API_URL: "https://api.example.test/" },
       fetch: async () =>
-        Response.json({ message: "public plan failure should stay hidden" }, { status: 503 }),
+        Response.json(
+          { message: "public plan failure should stay hidden" },
+          { status: 503, headers: { "x-request-id": "unsafe/request" } },
+        ),
       accountService: { getAllAccounts: () => [] },
       activityService: {
         getBrokerSyncProfile: () => null,
@@ -497,7 +511,115 @@ describe("TS Connect local session service", () => {
     try {
       await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
         code: "internal_error",
-        message: "API error 503",
+        message: expect.stringMatching(
+          /^API error 503 \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on public response read errors", async () => {
+    const db = new Database(":memory:");
+    const service = createLocalConnectService({
+      db,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      fetch: async () => unreadableConnectResponse({ "x-request-id": "server-read-123" }),
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlansPublic()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^Failed to read response: body broke \(clientRequestId=app:[0-9a-f-]+, requestId=server-read-123\)$/,
+        ),
+        status: 500,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on authenticated API errors", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        requests.push({ url: String(input), init });
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return Response.json(
+          { error: "server_error", message: "temporary failure" },
+          { status: 500, headers: { "x-request-id": "server-req-123" } },
+        );
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^API error 500: temporary failure \(clientRequestId=app:[0-9a-f-]+, requestId=server-req-123\)$/,
+        ),
+        status: 500,
+      });
+      const connectRequest = requests.find((request) =>
+        request.url.includes("/api/v1/subscription/plans"),
+      );
+      expect(connectRequest?.init?.headers).toMatchObject({
+        "x-wf-client-request-id": expect.stringMatching(/^app:[0-9a-f-]+$/),
+      });
+      expect(connectRequest?.init?.headers).not.toHaveProperty("x-request-id");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("includes Connect cloud request metadata on authenticated response read errors", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    const service = createLocalConnectService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        if (String(input).includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        return unreadableConnectResponse({ "x-request-id": "server-read-456" });
+      },
+      accountService: { getAllAccounts: () => [] },
+      activityService: {
+        getBrokerSyncProfile: () => null,
+        saveBrokerSyncProfileRules: (request) => request,
+      },
+    });
+
+    try {
+      await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
+        code: "internal_error",
+        message: expect.stringMatching(
+          /^Failed to read response: body broke \(clientRequestId=app:[0-9a-f-]+, requestId=server-read-456\)$/,
+        ),
         status: 500,
       });
     } finally {
@@ -532,7 +654,9 @@ describe("TS Connect local session service", () => {
     try {
       await expect(service.getSubscriptionPlans()).rejects.toMatchObject({
         code: "internal_error",
-        message: "API error 503",
+        message: expect.stringMatching(
+          /^API error 503 \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
         status: 500,
       });
     } finally {
@@ -6723,9 +6847,11 @@ describe("TS Connect local session service", () => {
             []
           >("SELECT sync_status, last_error FROM brokers_sync_state WHERE account_id = 'transaction-account' AND provider = 'SNAPTRADE'")
           .get(),
-      ).toEqual({
+      ).toMatchObject({
         sync_status: "FAILED",
-        last_error: "API error 503: upstream unavailable",
+        last_error: expect.stringMatching(
+          /^API error 503: upstream unavailable \(clientRequestId=app:[0-9a-f-]+, requestId=none\)$/,
+        ),
       });
     } finally {
       db.close();

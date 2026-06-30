@@ -7739,6 +7739,11 @@ contract:
   existing-asset search results returning Rust-compatible canonical symbol,
   canonical exchange MIC, provider ID, provider symbol, quote mode, manual data
   source, and Yahoo-suffixed equity display symbols.
+- `pr5-connect-cloud-request-metadata`: verification passed. Public and
+  authenticated Connect API failures now include a generated client request ID
+  and safe server request ID metadata in error messages, while unsafe server
+  request IDs remain suppressed and outbound requests only send the client
+  request header. Full Connect tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
