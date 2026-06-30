@@ -7681,6 +7681,12 @@ contract:
   resolution when disposition-driving fields changed during the await,
   preventing stale omitted fields from overwriting concurrent updates. Focused
   activity unit/runtime tests and full repository check passed.
+- `pr5-bulk-activity-provider-resolution`: verification passed.
+  `POST /api/v1/activities/bulk` create/update entries now reuse the direct
+  provider-resolution seam before bulk preparation, share a cached symbol-search
+  map across entries, and preserve atomic writes plus FX-pair preflight
+  behavior. Focused activity unit/runtime tests and full repository check
+  passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -6127,6 +6127,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   resolution when disposition-driving fields changed during the await,
   preventing stale omitted fields from overwriting concurrent updates. Focused
   activity unit/runtime tests and full repository check passed.
+- Turn 1111: Extended provider-backed direct activity resolution to bulk
+  mutations. `POST /api/v1/activities/bulk` create/update entries now share the
+  direct provider-resolution seam before bulk preparation, including cached
+  symbol search and stale-update recomputation, while preserving atomic bulk
+  writes. Focused activity unit/runtime tests and full repository check passed.
 
 ## Deferred items
 

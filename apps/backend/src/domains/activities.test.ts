@@ -4460,6 +4460,115 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("provider-resolves bulk activity-created assets", async () => {
+    const db = createActivitiesDb();
+    const calls: string[] = [];
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch(query) {
+        calls.push(query);
+        const names: Record<string, string> = {
+          SHOP: "Shopify Provider",
+          MSFT: "Microsoft Provider",
+        };
+        const name = names[query];
+        return name
+          ? [
+              {
+                symbol: query,
+                shortName: name,
+                longName: name,
+                exchange: "NYSE",
+                exchangeMic: "XNYS",
+                exchangeName: "NYSE",
+                quoteType: "EQUITY",
+                typeDisplay: "",
+                currency: "USD",
+                dataSource: "FINNHUB",
+                isExisting: false,
+                index: "",
+                score: 1,
+              },
+            ]
+          : [];
+      },
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertAsset(db, {
+        id: "AAPL",
+        displayCode: "AAPL",
+        instrumentSymbol: "AAPL",
+        exchangeMic: "XNAS",
+      });
+      insertActivity(db, {
+        id: "bulk-provider-update",
+        accountId: "account-1",
+        assetId: "AAPL",
+        activityType: "BUY",
+        activityDate: "2025-01-18",
+        quantity: "1",
+        unitPrice: "50",
+        amount: "50",
+        currency: "USD",
+      });
+
+      const result = (await service.bulkMutateActivities?.({
+        creates: [
+          {
+            id: "bulk-provider-create-temp",
+            accountId: "account-1",
+            asset: { symbol: "SHOP" },
+            activityType: "BUY",
+            activityDate: "2025-01-19",
+            quantity: "1",
+            unitPrice: "50",
+            amount: "50",
+            currency: "USD",
+          },
+        ],
+        updates: [
+          {
+            id: "bulk-provider-update",
+            accountId: "account-1",
+            asset: { symbol: "MSFT" },
+            activityType: "BUY",
+            activityDate: "2025-01-18",
+            quantity: "1",
+            unitPrice: "60",
+            amount: "60",
+            currency: "USD",
+          },
+        ],
+      })) as ActivityBulkMutationResult;
+
+      expect(result.errors).toEqual([]);
+      expect(result.createdMappings).toEqual([
+        { tempId: "bulk-provider-create-temp", activityId: result.created[0]?.id },
+      ]);
+      expect(readAssetById(db, result.created[0]?.assetId ?? "")).toMatchObject({
+        name: "Shopify Provider",
+        display_code: "SHOP",
+        instrument_symbol: "SHOP",
+        instrument_exchange_mic: "XNYS",
+      });
+      expect(readAssetById(db, result.updated[0]?.assetId ?? "")).toMatchObject({
+        name: "Microsoft Provider",
+        display_code: "MSFT",
+        instrument_symbol: "MSFT",
+        instrument_exchange_mic: "XNYS",
+      });
+      expect(readAssetCount(db)).toBe(3);
+      expect(calls).toEqual(["SHOP", "MSFT"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("ensures bulk activity FX pairs before writes", async () => {
     const db = createActivitiesDb();
 

@@ -4444,6 +4444,143 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("provider-resolves runtime bulk activity-created assets", async () => {
+    const appDataDir = mkdtempSync(
+      path.join(tmpdir(), "wealthfolio-runtime-activity-provider-bulk-"),
+    );
+    const marketCalls: string[] = [];
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: ((input) => {
+        const url = String(input);
+        marketCalls.push(url);
+        const responseByUrl: Record<string, Record<string, unknown>> = {
+          "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP": {
+            symbol: "SHOP",
+            exchange: "NYQ",
+            quoteType: "EQUITY",
+            shortname: "Shopify US",
+            currency: "USD",
+            score: 5,
+          },
+          "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT": {
+            symbol: "MSFT",
+            exchange: "NYQ",
+            quoteType: "EQUITY",
+            shortname: "Microsoft US",
+            currency: "USD",
+            score: 5,
+          },
+        };
+        const quote = responseByUrl[url];
+        if (quote) {
+          return Promise.resolve(Response.json({ quotes: [quote] }));
+        }
+        throw new Error(`unexpected market data fetch: ${url}`);
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedRuntimeTransactionActivityInput(seedDb);
+      } finally {
+        seedDb.close();
+      }
+
+      const bulkResponse = await fetch(`${server.baseUrl}/api/v1/activities/bulk`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          creates: [
+            {
+              id: "bulk-provider-temp",
+              accountId: "tx-account",
+              asset: { symbol: "SHOP" },
+              activityType: "BUY",
+              activityDate: "2026-05-15T12:00:00.000Z",
+              quantity: "1",
+              unitPrice: "50",
+              amount: "50",
+              currency: "USD",
+            },
+          ],
+          updates: [
+            {
+              id: "tx-buy",
+              accountId: "tx-account",
+              asset: { symbol: "MSFT" },
+              activityType: "BUY",
+              activityDate: "2026-05-14T12:00:00.000Z",
+              quantity: "1",
+              unitPrice: "60",
+              amount: "60",
+              currency: "USD",
+            },
+          ],
+        }),
+      });
+      expect(bulkResponse.status).toBe(200);
+      const bulkResult = (await bulkResponse.json()) as {
+        created: Array<{ assetId?: string }>;
+        updated: Array<{ assetId?: string }>;
+        errors: unknown[];
+      };
+      expect(bulkResult.errors).toEqual([]);
+      expect(bulkResult.created[0]?.assetId).toEqual(expect.any(String));
+      expect(bulkResult.updated[0]?.assetId).toEqual(expect.any(String));
+      expect(bulkResult.updated[0]?.assetId).not.toBe("tx-asset");
+
+      const verifyDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assetRows = verifyDb
+          .query<
+            {
+              name: string | null;
+              display_code: string | null;
+              instrument_symbol: string | null;
+              instrument_exchange_mic: string | null;
+            },
+            [string, string]
+          >(
+            `
+              SELECT name, display_code, instrument_symbol, instrument_exchange_mic
+              FROM assets
+              WHERE id IN (?, ?)
+              ORDER BY display_code
+            `,
+          )
+          .all(String(bulkResult.updated[0]?.assetId), String(bulkResult.created[0]?.assetId));
+        expect(assetRows).toEqual([
+          {
+            name: "Microsoft US",
+            display_code: "MSFT",
+            instrument_symbol: "MSFT",
+            instrument_exchange_mic: "XNYS",
+          },
+          {
+            name: "Shopify US",
+            display_code: "SHOP",
+            instrument_symbol: "SHOP",
+            instrument_exchange_mic: "XNYS",
+          },
+        ]);
+      } finally {
+        verifyDb.close();
+      }
+      expect(marketCalls).toEqual([
+        "https://query2.finance.yahoo.com/v1/finance/search?q=SHOP",
+        "https://query2.finance.yahoo.com/v1/finance/search?q=MSFT",
+      ]);
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("exports runtime activities through SQLite-backed data export route", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-activity-export-"));
     const runtime = createSqliteBackedBackendServices({

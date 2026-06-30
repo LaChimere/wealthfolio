@@ -742,9 +742,13 @@ export function createActivityService(
     },
 
     bulkMutateActivities(input) {
-      if (options.ensureFxPairs) {
+      if (options.ensureFxPairs || options.symbolSearch) {
         return (async () => {
-          const prepared = prepareBulkActivityMutation(db, input, options.exchangeMetadata);
+          const prepared = await prepareBulkActivityMutationWithProviderResolution(
+            db,
+            input,
+            options,
+          );
           if (prepared.errors.length > 0) {
             return emptyBulkMutationResult(prepared.errors);
           }
@@ -2286,6 +2290,7 @@ async function directActivityInputWithProviderResolution(
   input: Record<string, unknown>,
   options: ActivityServiceOptions,
   existing?: ActivityRow,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>> = new Map(),
 ): Promise<Record<string, unknown>> {
   if (!options.symbolSearch) {
     return input;
@@ -2346,7 +2351,7 @@ async function directActivityInputWithProviderResolution(
     assetInput.symbol,
     preferredCurrency,
     options,
-    new Map(),
+    searchCache,
   );
   if (!resolution) {
     return input;
@@ -2370,6 +2375,91 @@ async function directActivityInputWithProviderResolution(
       ...(assetInput.name || !resolution.name ? {} : { name: resolution.name }),
     },
   };
+}
+
+async function prepareBulkActivityMutationWithProviderResolution(
+  db: Database,
+  input: Record<string, unknown>,
+  options: ActivityServiceOptions,
+): Promise<PreparedBulkActivityMutation> {
+  const resolvedInput = options.symbolSearch
+    ? await bulkActivityInputWithProviderResolution(db, input, options)
+    : input;
+  return prepareBulkActivityMutation(db, resolvedInput, options.exchangeMetadata);
+}
+
+async function bulkActivityInputWithProviderResolution(
+  db: Database,
+  input: Record<string, unknown>,
+  options: ActivityServiceOptions,
+): Promise<Record<string, unknown>> {
+  const creates = recordArrayField(input, "creates");
+  const updates = recordArrayField(input, "updates");
+  if (creates.length === 0 && updates.length === 0) {
+    return input;
+  }
+
+  const searchCache = new Map<string, Promise<SymbolSearchResult[]>>();
+  const [resolvedCreates, resolvedUpdates] = await Promise.all([
+    Promise.all(
+      creates.map((createInput) =>
+        directActivityInputWithProviderResolution(db, createInput, options, undefined, searchCache),
+      ),
+    ),
+    Promise.all(
+      updates.map((updateInput) =>
+        bulkUpdateInputWithProviderResolution(db, updateInput, options, searchCache),
+      ),
+    ),
+  ]);
+
+  return {
+    ...input,
+    creates: resolvedCreates,
+    updates: resolvedUpdates,
+  };
+}
+
+async function bulkUpdateInputWithProviderResolution(
+  db: Database,
+  input: Record<string, unknown>,
+  options: ActivityServiceOptions,
+  searchCache: Map<string, Promise<SymbolSearchResult[]>>,
+): Promise<Record<string, unknown>> {
+  const activityId = optionalTrimmedString(input.id);
+  if (!activityId) {
+    return input;
+  }
+
+  let initialExisting: ActivityRow;
+  try {
+    initialExisting = readActivityRow(db, activityId);
+  } catch (error) {
+    if (!errorMessage(error).startsWith("Record not found: activity ")) {
+      throw error;
+    }
+    return input;
+  }
+
+  const initiallyResolvedInput = await directActivityInputWithProviderResolution(
+    db,
+    input,
+    options,
+    initialExisting,
+    searchCache,
+  );
+  let existing: ActivityRow;
+  try {
+    existing = readActivityRow(db, activityId);
+  } catch (error) {
+    if (!errorMessage(error).startsWith("Record not found: activity ")) {
+      throw error;
+    }
+    return initiallyResolvedInput;
+  }
+  return activityUpdateProviderContextChanged(input, initialExisting, existing)
+    ? directActivityInputWithProviderResolution(db, input, options, existing, searchCache)
+    : initiallyResolvedInput;
 }
 
 function directActivityEffectiveSubtype(
