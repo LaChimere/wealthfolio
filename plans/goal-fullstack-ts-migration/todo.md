@@ -7288,6 +7288,11 @@ contract:
   `market:sync-error` string payloads reach listeners unchanged. Focused
   frontend/backend/addon-sdk validation, frontend and backend type-checks, and
   full repository check passed.
+- `pr5-rust-addon-market-sync-error-permission`: verification passed. The legacy
+  Rust add-on permission detector now includes `events.market.onSyncError`
+  alongside market sync start/complete, preserving reference compatibility for
+  manifest/static-analysis behavior. Focused
+  `cargo test -p wealthfolio-core addons --quiet` passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
