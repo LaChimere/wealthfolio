@@ -7556,6 +7556,10 @@ contract:
   normalized store endpoints; the filesystem add-on ID guard now rejects `.` and
   `..` before install, staging, or store-download work. Focused add-on tests and
   full repository check passed.
+- `pr5-addon-dot-id-review`: verification passed. Claude Opus 4.8 xhigh and
+  GPT-5.5 xhigh re-reviewed the dot-ID hardening fix, confirmed the `.`/`..`
+  install, staging, and store-download issue is remediated, and found no new
+  actionable issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
