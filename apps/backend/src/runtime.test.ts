@@ -20363,6 +20363,9 @@ describe("TS backend runtime composition", () => {
       const db = openSqliteDatabase(runtime.dbPath);
       try {
         db.prepare(
+          "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('base_currency', 'USD')",
+        ).run();
+        db.prepare(
           `
             INSERT INTO accounts (
               id, name, account_type, "group", currency, is_default, is_active,
@@ -20525,6 +20528,69 @@ describe("TS backend runtime composition", () => {
         ],
         cashBalances: { USD: "999" },
       });
+      const fixtureDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        const assets = fixtureDb
+          .query<
+            { id: string; display_code: string },
+            []
+          >("SELECT id, display_code FROM assets WHERE display_code IN ('INCL', 'EXCL')")
+          .all();
+        const includedAssetId = assets.find((asset) => asset.display_code === "INCL")?.id;
+        const excludedAssetId = assets.find((asset) => asset.display_code === "EXCL")?.id;
+        if (!includedAssetId || !excludedAssetId) {
+          throw new Error("Portfolio scope fixture assets were not created");
+        }
+        fixtureDb.exec(`
+          INSERT INTO taxonomies (
+            id, name, color, description, is_system, is_single_select, sort_order, created_at, updated_at
+          )
+          VALUES (
+            'portfolio_scope_taxonomy', 'Portfolio Scope', '#123456', NULL, 0, 0, 1,
+            '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z'
+          );
+          INSERT INTO taxonomy_categories (
+            id, taxonomy_id, parent_id, name, key, color, description, sort_order, created_at, updated_at
+          )
+          VALUES (
+            'portfolio_scope_category', 'portfolio_scope_taxonomy', NULL, 'Scoped', 'scoped',
+            '#654321', NULL, 1, '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z'
+          );
+        `);
+        fixtureDb
+          .prepare(
+            `
+              INSERT INTO asset_taxonomy_assignments (
+                id, asset_id, taxonomy_id, category_id, weight, source, created_at, updated_at
+              )
+              VALUES
+                ('scope-assignment-included', ?, 'portfolio_scope_taxonomy', 'portfolio_scope_category', '1', 'MANUAL', '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z'),
+                ('scope-assignment-excluded', ?, 'portfolio_scope_taxonomy', 'portfolio_scope_category', '1', 'MANUAL', '2026-04-02T00:00:00Z', '2026-04-02T00:00:00Z')
+            `,
+          )
+          .run(includedAssetId, excludedAssetId);
+        fixtureDb
+          .prepare(
+            `
+              INSERT INTO activities (
+                id, account_id, asset_id, activity_type, subtype, status, activity_date,
+                quantity, unit_price, amount, fee, currency, notes, metadata,
+                source_system, source_record_id, source_group_id, idempotency_key,
+                import_run_id, is_user_modified, needs_review, created_at, updated_at
+              )
+              VALUES
+                ('portfolio-scope-income-included', 'portfolio-scope-account-1', ?, 'DIVIDEND', NULL, 'POSTED',
+                  '2026-04-03T00:00:00.000Z', NULL, NULL, '10', NULL, 'USD', NULL, NULL,
+                  NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-04-03T00:00:00.000Z', '2026-04-03T00:00:00.000Z'),
+                ('portfolio-scope-income-excluded', 'portfolio-scope-excluded', ?, 'DIVIDEND', NULL, 'POSTED',
+                  '2026-04-03T00:00:00.000Z', NULL, NULL, '999', NULL, 'USD', NULL, NULL,
+                  NULL, NULL, NULL, NULL, NULL, 0, 0, '2026-04-03T00:00:00.000Z', '2026-04-03T00:00:00.000Z')
+            `,
+          )
+          .run(includedAssetId, excludedAssetId);
+      } finally {
+        fixtureDb.close();
+      }
 
       const holdingsResponse = await postJson("/api/v1/holdings/query", {
         filter: portfolioFilter,
@@ -20554,22 +20620,41 @@ describe("TS backend runtime composition", () => {
 
       const allocationHoldingsResponse = await postJson("/api/v1/allocations/holdings/query", {
         filter: portfolioFilter,
-        taxonomyId: "asset_classes",
-        categoryId: "cash",
+        taxonomyId: "portfolio_scope_taxonomy",
+        categoryId: "portfolio_scope_category",
       });
       expect(allocationHoldingsResponse.status).toBe(200);
-      await expect(allocationHoldingsResponse.json()).resolves.toMatchObject({
-        taxonomyId: "asset_classes",
-        categoryId: "cash",
+      const allocationHoldings = (await allocationHoldingsResponse.json()) as {
+        taxonomyId: string;
+        categoryId: string;
+        totalValue: number;
+        holdings: Array<{ symbol?: string }>;
+      };
+      expect(allocationHoldings).toMatchObject({
+        taxonomyId: "portfolio_scope_taxonomy",
+        categoryId: "portfolio_scope_category",
         totalValue: 0,
-        holdings: [],
+        holdings: [expect.objectContaining({ symbol: "INCL" })],
       });
+      expect(allocationHoldings.holdings.map((holding) => holding.symbol)).not.toContain("EXCL");
 
       const incomeResponse = await postJson("/api/v1/income/summary/query", {
         filter: portfolioFilter,
       });
       expect(incomeResponse.status).toBe(200);
-      await expect(incomeResponse.json()).resolves.toEqual([]);
+      const income = (await incomeResponse.json()) as Array<{
+        period: string;
+        totalIncome: number;
+        byAccount?: Record<string, { total: number }>;
+      }>;
+      expect(income[0]).toMatchObject({
+        period: "TOTAL",
+        totalIncome: 10,
+        byAccount: {
+          "portfolio-scope-account-1": expect.objectContaining({ total: 10 }),
+        },
+      });
+      expect(income[0]?.byAccount).not.toHaveProperty("portfolio-scope-excluded");
     } finally {
       server.stop();
       await runtime.close();
