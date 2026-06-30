@@ -8,7 +8,7 @@ turns_used: 1073
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T17:45:18+09:00"
+updated_at: "2026-06-30T17:54:39+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5952,6 +5952,12 @@ updated_at: "2026-06-30T17:45:18+09:00"
   expose only the allowed valuation-history tool, stream the valuation payload,
   and pass the parsed result into the follow-up provider request. Focused
   runtime AI tests and full repository check passed.
+- Turn 1076: Added runtime AI `get_asset_allocation` tool execution evidence.
+  The standalone TS runtime now proves `/api/v1/ai/chat/stream` can execute
+  `get_asset_allocation` against persisted holdings snapshot cash data, expose
+  only the allowed allocation tool, stream Rust-shaped asset-class allocation
+  payloads, and pass the parsed allocation result into the follow-up provider
+  request. Focused runtime AI tests and full repository check passed.
 
 ## Deferred items
 

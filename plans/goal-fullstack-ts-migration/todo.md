@@ -7502,6 +7502,12 @@ contract:
   allowed valuation-history tool, stream the valuation payload, and pass the
   parsed result into the follow-up provider request. Focused runtime AI tests
   and full repository check passed.
+- `pr5-runtime-ai-asset-allocation-tool`: verification passed. The standalone TS
+  runtime now proves `/api/v1/ai/chat/stream` can execute `get_asset_allocation`
+  against persisted holdings snapshot cash data, expose only the allowed
+  allocation tool, stream Rust-shaped asset-class allocation payloads, and pass
+  the parsed allocation result into the follow-up provider request. Focused
+  runtime AI tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
