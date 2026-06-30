@@ -1472,6 +1472,80 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("rejects malformed runtime health fix actions before side effects", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-fix-errors-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      marketDataFetch: (() => {
+        throw new Error("market data should not be fetched for invalid health fixes");
+      }) as typeof fetch,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+
+    async function expectHealthFixError(
+      body: Record<string, unknown>,
+      status: number,
+      code: string | number,
+      message: string,
+    ): Promise<void> {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(status);
+      await expect(response.json()).resolves.toEqual({ code, message });
+    }
+
+    try {
+      await expectHealthFixError(
+        { id: "sync_prices", label: "Sync Prices", payload: [] },
+        400,
+        "invalid_payload",
+        "No assets selected for price sync",
+      );
+      await expectHealthFixError(
+        { id: "retry_sync", label: "Retry Sync", payload: ["asset-1", 1] },
+        400,
+        "invalid_payload",
+        "Invalid payload for retry_sync: expected an array of asset IDs",
+      );
+      await expectHealthFixError(
+        { id: "fetch_fx", label: "Fetch Exchange Rates", payload: ["EUR"] },
+        400,
+        "invalid_payload",
+        "Invalid currency pair for fetch_fx: EUR",
+      );
+      await expectHealthFixError(
+        {
+          id: "migrate_classifications",
+          label: "Migrate Classifications",
+          payload: ["asset-1", 1],
+        },
+        400,
+        "invalid_payload",
+        "Invalid payload for migrate_classifications: expected an array of asset IDs",
+      );
+      await expectHealthFixError(
+        { id: "unknown_fix", label: "Unknown", payload: null },
+        404,
+        "not_found",
+        "Unknown health fix action: unknown_fix",
+      );
+      await expectHealthFixError(
+        { id: "sync_prices", label: "Sync Prices" },
+        400,
+        400,
+        "payload is required",
+      );
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("surfaces runtime orphan activity health issues from SQLite state", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-orphans-"));
     const runtime = createSqliteBackedBackendServices({
