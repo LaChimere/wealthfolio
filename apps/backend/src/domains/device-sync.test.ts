@@ -171,6 +171,56 @@ describe("TS local device sync service", () => {
     );
     expect(partiallyFailingSecretService.entries.get("sync_device_id")).toBe("old");
 
+    const concurrentSecretService = createMemorySecretService();
+    concurrentSecretService.entries.set("sync_identity", '{"version":2,"deviceId":"old"}');
+    concurrentSecretService.entries.set("sync_device_id", "old");
+    const concurrentService = createLocalDeviceSyncService({
+      secretService: {
+        ...concurrentSecretService,
+        async setSecret(secretKey, secret) {
+          if (secretKey === "sync_device_id" && secret === "device-fail") {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            throw new Error("transient legacy write failure");
+          }
+          concurrentSecretService.entries.set(secretKey, secret);
+        },
+      },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { device_nonce?: string };
+        const deviceId = body.device_nonce === "instance-fail" ? "device-fail" : "device-ok";
+        return Response.json({
+          mode: "READY",
+          device_id: deviceId,
+          e2ee_key_version: 2,
+          trust_state: "trusted",
+        });
+      },
+    });
+    const failedRegistration = concurrentService.registerDevice({
+      ...request,
+      instanceId: "instance-fail",
+    });
+    const successfulRegistration = concurrentService.registerDevice({
+      ...request,
+      instanceId: "instance-ok",
+    });
+    await expect(failedRegistration).rejects.toMatchObject({
+      code: "internal_error",
+      message: "Failed to store device ID: transient legacy write failure",
+      status: 500,
+    });
+    await expect(successfulRegistration).resolves.toMatchObject({
+      device_id: "device-ok",
+    });
+    expect(JSON.parse(concurrentSecretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+      deviceNonce: "instance-ok",
+      deviceId: "device-ok",
+    });
+    expect(concurrentSecretService.entries.get("sync_device_id")).toBe("device-ok");
+
     let enrollBody =
       '{"mode":"READY","device_id":"device-1","e2ee_key_version":2.0,"trust_state":"trusted"}';
     const malformedResponseService = createLocalDeviceSyncService({

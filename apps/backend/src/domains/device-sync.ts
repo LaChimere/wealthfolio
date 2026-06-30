@@ -185,6 +185,17 @@ export function createLocalDeviceSyncService({
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
   const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
   const pairingOverwriteApprovals = new Set<string>();
+  let enrollmentPersistenceQueue = Promise.resolve();
+  const persistEnrolledIdentityExclusive = (
+    secretStore: SecretService,
+    deviceNonce: string,
+    deviceId: string,
+  ) => {
+    const persist = () => persistEnrolledDeviceIdentity(secretStore, deviceNonce, deviceId);
+    const queued = enrollmentPersistenceQueue.then(persist, persist);
+    enrollmentPersistenceQueue = queued.catch(() => undefined);
+    return queued;
+  };
 
   return {
     async registerDevice(request) {
@@ -211,7 +222,7 @@ export function createLocalDeviceSyncService({
       const result = enrollDeviceResponseFromCloud(enrollResponse.value, enrollResponse.bodyText);
       const deviceId = requiredString(result.device_id, "enroll response");
       try {
-        await persistEnrolledDeviceIdentity(secretService, request.instanceId, deviceId);
+        await persistEnrolledIdentityExclusive(secretService, request.instanceId, deviceId);
       } catch (error) {
         throw new DeviceSyncServiceError(
           "internal_error",

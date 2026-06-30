@@ -7578,6 +7578,12 @@ contract:
   key initialization; failed dual-secret persistence now rolls back to the
   previous secret state. Focused device-sync unit/runtime tests and full
   repository check passed.
+- `pr5-device-registration-concurrent-rollback`: verification passed. Device
+  registration secret persistence is now serialized per service instance so a
+  failed rollback cannot clobber a concurrent successful registration; the
+  regression test covers the interleaving that previously could leave
+  `sync_identity` and `sync_device_id` mismatched. Focused device-sync
+  unit/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
