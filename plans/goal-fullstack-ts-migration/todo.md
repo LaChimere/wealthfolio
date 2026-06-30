@@ -7623,6 +7623,11 @@ contract:
   runtime assertions proving they refresh the compatibility `sync_device_id`
   secret from the canonical `sync_identity` device ID. Focused Connect/runtime
   tests and full repository check passed.
+- `pr5-market-data-yahoo-secondary-source-review-fix`: verification passed.
+  Review found the Yahoo-secondary search fallback assertion was accidentally
+  changed to `FINNHUB`; it now correctly expects `dataSource: "YAHOO"` while the
+  real Finnhub fallback assertions remain `FINNHUB`. Focused market-data/runtime
+  tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

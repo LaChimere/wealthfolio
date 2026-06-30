@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1098
+turns_used: 1099
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T22:30:19+09:00"
+updated_at: "2026-06-30T22:38:52+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -6070,6 +6070,10 @@ updated_at: "2026-06-30T22:30:19+09:00"
   Existing READY/STALE/REGISTERED `/connect/device/enable` paths now have unit
   and runtime assertions proving they refresh the compatibility `sync_device_id`
   secret from the canonical `sync_identity` device ID. Focused Connect/runtime
+  tests and full repository check passed.
+- Turn 1099: Addressed recent parity review feedback. The Yahoo-secondary search
+  fallback test now correctly expects `dataSource: "YAHOO"`, while the real
+  Finnhub fallback assertions remain `FINNHUB`. Focused market-data/runtime
   tests and full repository check passed.
 
 ## Deferred items
