@@ -2742,11 +2742,14 @@ describe("TS backend runtime composition", () => {
         "done",
       ]);
       expect(JSON.stringify(events)).toContain("Runtime AI Tool Account");
-      expect(providerBodies[0]?.tools).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ function: expect.objectContaining({ name: "get_accounts" }) }),
-        ]),
-      );
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      )
+        .map((tool) => tool.function?.name)
+        .sort();
+      expect(exposedToolNames).toEqual(["get_accounts", "get_cash_balances"]);
+      expect(exposedToolNames).not.toContain("record_activity");
+      expect(exposedToolNames).not.toContain("import_csv");
       expect(JSON.stringify(providerBodies[1]?.messages)).toContain("Runtime AI Tool Account");
     } finally {
       globalThis.fetch = originalFetch;
