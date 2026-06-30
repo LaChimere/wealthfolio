@@ -7293,6 +7293,11 @@ contract:
   alongside market sync start/complete, preserving reference compatibility for
   manifest/static-analysis behavior. Focused
   `cargo test -p wealthfolio-core addons --quiet` passed.
+- `pr5-global-broker-sync-error-payload`: verification passed. The React global
+  event listener test now proves `broker:sync-error` payloads dismiss the broker
+  loading toast, invalidate queries, and show the broker failure message from
+  the runtime payload. Focused hook validation, frontend type-check, and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
