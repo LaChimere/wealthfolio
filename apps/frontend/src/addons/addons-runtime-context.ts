@@ -144,6 +144,7 @@ function assertInternalAddonRoute(addonId: string, route: string, permissionPath
     route.length === 0 ||
     route.trim() !== route ||
     hasControlCharacter(route) ||
+    route.includes("\\") ||
     !route.startsWith("/") ||
     route.startsWith("//")
   ) {

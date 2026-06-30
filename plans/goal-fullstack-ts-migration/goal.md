@@ -6244,6 +6244,10 @@ updated_at: "2026-07-01T00:39:21+09:00"
   classification health issue now names the specific missing taxonomy and uses a
   simple `a`/`an` article helper, so users can tell which allocation dimension
   needs assignment. Focused health tests and full repository check passed.
+- Turn 1134: Addressed add-on route-hardening review feedback. Add-on sidebar
+  and router route validation now rejects backslashes, closing the `/\host`
+  protocol-relative bypass while retaining internal app paths and `#` sidebar
+  placeholders. Focused frontend add-on tests and full repository check passed.
 
 ## Deferred items
 

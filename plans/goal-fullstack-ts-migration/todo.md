@@ -7809,6 +7809,11 @@ contract:
   issue message via a simple `a`/`an` article helper, aligning the message with
   the affected classification dimension. Focused health tests and full
   repository check passed.
+- `pr5-addon-ui-route-backslash-review-fix`: verification passed. Review found
+  `/\host` could bypass the add-on route validator's protocol-relative route
+  guard; sidebar and router route validation now rejects backslashes while
+  retaining internal app paths and `#` sidebar placeholders. Focused frontend
+  add-on tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

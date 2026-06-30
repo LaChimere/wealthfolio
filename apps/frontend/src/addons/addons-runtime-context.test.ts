@@ -79,6 +79,12 @@ describe("addon runtime context permissions", () => {
         component: React.lazy(async () => ({ default: () => null })),
       }),
     ).toThrow("Addon ui-addon must provide an internal app route for context.router.add");
+    expect(() =>
+      context.router.add({
+        path: "/\\example.test",
+        component: React.lazy(async () => ({ default: () => null })),
+      }),
+    ).toThrow("Addon ui-addon must provide an internal app route for context.router.add");
     expect(getDynamicRoutes()).toHaveLength(0);
 
     expect(() =>
