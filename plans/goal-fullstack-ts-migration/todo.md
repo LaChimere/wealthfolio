@@ -7266,6 +7266,11 @@ contract:
   payloads clear loading state without error toasts, while `failed_syncs`
   payloads raise the health-linked error toast. Focused hook validation,
   frontend type-check, and full repository check passed.
+- `pr5-frontend-electron-market-sync-payload`: verification passed. The frontend
+  Electron adapter test now proves `market:sync-complete` preload events
+  preserve the Rust-shaped `{ failed_syncs, skipped_reasons }` object payload
+  for React listeners. Focused adapter validation, frontend type-check, and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
