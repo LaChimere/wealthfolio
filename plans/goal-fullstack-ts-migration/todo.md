@@ -7593,6 +7593,11 @@ contract:
   queue and conditionally skips clearing secrets if a concurrent successful
   registration has moved `sync_identity`/`sync_device_id` to a new device.
   Focused pairing/concurrency tests and full repository check passed.
+- `pr5-device-cancel-flow-device-binding`: verification passed. Pairing flow
+  state now captures the device ID used when the flow is created, so cancelling
+  an old flow targets and conditionally clears only that original device instead
+  of re-reading and deleting a later registered device. Focused
+  pairing/concurrency tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

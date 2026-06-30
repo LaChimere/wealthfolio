@@ -703,6 +703,83 @@ describe("TS local device sync service", () => {
     }
   });
 
+  test("cancels old pairing flow without clearing a later registered device", async () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE accounts (id TEXT PRIMARY KEY NOT NULL);
+      INSERT INTO sync_device_config (device_id, key_version, trust_state, last_bootstrap_at)
+      VALUES ('device-1', 2, 'untrusted', NULL);
+      INSERT INTO accounts (id) VALUES ('account-1');
+    `);
+    const secretService = createMemorySecretService();
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({ version: 2, deviceNonce: "nonce-1", deviceId: "device-1" }),
+    );
+    secretService.entries.set("sync_device_id", "device-1");
+    const requests: string[] = [];
+    const service = createLocalDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test/" },
+      connectService: {
+        restoreSyncSession: () => ({ accessToken: "token", refreshToken: "refresh" }),
+      },
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push(url);
+        if (url.endsWith("/api/v1/sync/team/devices")) {
+          const body = JSON.parse(String(init?.body)) as { device_nonce?: string };
+          return Response.json({
+            mode: "READY",
+            device_id: body.device_nonce === "new-nonce" ? "device-2" : "device-1",
+            e2ee_key_version: 2,
+            trust_state: "trusted",
+          });
+        }
+        return Response.json({ success: true, key_version: 2 });
+      },
+    });
+
+    try {
+      const begin = (await service.beginPairingConfirm?.({
+        pairingId: "pairing-1",
+        proof: "proof",
+      })) as { flowId: string };
+      await expect(
+        service.registerDevice({
+          displayName: "New Device",
+          platform: "macos",
+          instanceId: "new-nonce",
+        }),
+      ).resolves.toMatchObject({ device_id: "device-2" });
+
+      await expect(service.cancelPairingFlow?.({ flowId: begin.flowId })).resolves.toEqual({
+        flowId: begin.flowId,
+        phase: { phase: "success" },
+      });
+      expect(requests).toContain(
+        "https://api.example.test/api/v1/sync/team/devices/device-1/pairings/pairing-1/cancel",
+      );
+      expect(requests).toContain("https://api.example.test/api/v1/sync/team/devices/device-1");
+      expect(requests).not.toContain("https://api.example.test/api/v1/sync/team/devices/device-2");
+      expect(JSON.parse(secretService.entries.get("sync_identity") ?? "{}")).toMatchObject({
+        deviceNonce: "new-nonce",
+        deviceId: "device-2",
+      });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-2");
+    } finally {
+      db.close();
+    }
+  });
+
   test("approves overwrite flow while waiting for remote snapshot", async () => {
     const db = new Database(":memory:");
     db.exec(`

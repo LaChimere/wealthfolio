@@ -183,7 +183,10 @@ export function createLocalDeviceSyncService({
   triggerSyncCycle,
   generateSnapshot,
 }: LocalDeviceSyncServiceDependencies): DeviceSyncService {
-  const pairingFlows = new Map<string, { pairingId: string; phase: Record<string, unknown> }>();
+  const pairingFlows = new Map<
+    string,
+    { pairingId: string; deviceId: string; phase: Record<string, unknown> }
+  >();
   const pairingOverwriteApprovals = new Set<string>();
   let enrollmentPersistenceQueue = Promise.resolve();
   const runEnrollmentSecretMutationExclusive = <T>(mutation: () => Promise<T>): Promise<T> => {
@@ -756,7 +759,7 @@ export function createLocalDeviceSyncService({
               nonEmptyTables: summary.nonEmptyTables,
             },
           };
-          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          pairingFlows.set(flowId, { pairingId: request.pairingId, deviceId, phase });
           return { flowId, phase };
         }
       }
@@ -768,7 +771,7 @@ export function createLocalDeviceSyncService({
             throw new DeviceSyncServiceError("internal_error", phase.message, 500);
           }
           const flowId = randomUUID();
-          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          pairingFlows.set(flowId, { pairingId: request.pairingId, deviceId, phase });
           return { flowId, phase };
         }
         void notifyPairingComplete(onPairingComplete);
@@ -787,7 +790,7 @@ export function createLocalDeviceSyncService({
         if (bootstrapWait.waiting) {
           const flowId = randomUUID();
           const phase = { phase: "syncing", detail: "waiting_snapshot" };
-          pairingFlows.set(flowId, { pairingId: request.pairingId, phase });
+          pairingFlows.set(flowId, { pairingId: request.pairingId, deviceId, phase });
           return { flowId, phase };
         }
       }
@@ -917,6 +920,7 @@ export function createLocalDeviceSyncService({
             env,
             fetchImpl,
             pairingId: flow.pairingId,
+            deviceId: flow.deviceId,
             runSecretMutationExclusive: runEnrollmentSecretMutationExclusive,
           });
         }
@@ -2948,6 +2952,7 @@ async function abortPairingFlowLocalState({
   env,
   fetchImpl,
   pairingId,
+  deviceId,
   runSecretMutationExclusive,
 }: {
   connectService: Pick<ConnectService, "restoreSyncSession"> | undefined;
@@ -2956,18 +2961,19 @@ async function abortPairingFlowLocalState({
   env: NodeJS.ProcessEnv;
   fetchImpl: typeof fetch;
   pairingId: string;
+  deviceId?: string;
   runSecretMutationExclusive?: <T>(mutation: () => Promise<T>) => Promise<T>;
 }): Promise<void> {
-  let deviceId: string | null | undefined;
+  let flowDeviceId: string | null | undefined = deviceId;
   if (secretService) {
     try {
-      deviceId = await getLocalSyncIdentityDeviceId(secretService);
+      flowDeviceId ??= await getLocalSyncIdentityDeviceId(secretService);
     } catch (error) {
       console.warn(`[DeviceSync] Failed to read sync identity while cancelling flow: ${error}`);
     }
   }
 
-  if (deviceId && connectService) {
+  if (flowDeviceId && connectService) {
     try {
       const accessToken = await restoreAccessTokenOrDisabled(connectService);
       try {
@@ -2975,8 +2981,8 @@ async function abortPairingFlowLocalState({
           accessToken,
           env,
           fetchImpl,
-          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}/pairings/${encodeURIComponent(pairingId)}/cancel`,
-          { method: "POST", deviceId },
+          `/api/v1/sync/team/devices/${encodeURIComponent(flowDeviceId)}/pairings/${encodeURIComponent(pairingId)}/cancel`,
+          { method: "POST", deviceId: flowDeviceId },
         );
       } catch {
         // Rust intentionally ignores cloud pairing-cancel failures during flow abort.
@@ -2986,7 +2992,7 @@ async function abortPairingFlowLocalState({
           accessToken,
           env,
           fetchImpl,
-          `/api/v1/sync/team/devices/${encodeURIComponent(deviceId)}`,
+          `/api/v1/sync/team/devices/${encodeURIComponent(flowDeviceId)}`,
           { method: "DELETE" },
         );
       } catch (error) {
@@ -3000,7 +3006,7 @@ async function abortPairingFlowLocalState({
   }
 
   if (secretService) {
-    const clearSecrets = () => clearLocalSyncSecretsBestEffort(secretService, deviceId ?? null);
+    const clearSecrets = () => clearLocalSyncSecretsBestEffort(secretService, flowDeviceId ?? null);
     await (runSecretMutationExclusive ? runSecretMutationExclusive(clearSecrets) : clearSecrets());
   }
   if (db) {
