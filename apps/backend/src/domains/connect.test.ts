@@ -8,7 +8,9 @@ import {
   createLocalConnectService,
   localNotReadyBackoffMs,
 } from "./connect";
+import { DEVICE_SYNC_PULL_COMPLETE_EVENT } from "../domain-events/planner";
 import { createEventBus, type BackendEvent } from "../events";
+import { createSyncCryptoService } from "./sync-crypto";
 
 function createMemorySecretService(): SecretService & { entries: Map<string, string> } {
   const entries = new Map<string, string>();
@@ -10255,6 +10257,189 @@ describe("TS Connect device sync local service", () => {
       await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
         status: "state_error",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("publishes pull-complete events after applying pulled replay events", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const eventBus = createEventBus();
+    const events: string[] = [];
+    eventBus.subscribe((event) => events.push(event.name));
+    const rootKey = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+    const crypto = createSyncCryptoService({
+      randomBytes: (size) => new Uint8Array(size).fill(3),
+    });
+    const accountId = "11111111-1111-4111-8111-111111111111";
+    const replayPayload = {
+      id: accountId,
+      name: "Synced account",
+      account_type: "CASH",
+      currency: "USD",
+      is_default: false,
+      is_active: true,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const dek = (await crypto.deriveDek(rootKey, 1)).value;
+    const encryptedPayload = (await crypto.encrypt(dek, JSON.stringify(replayPayload))).value;
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      CREATE TABLE sync_entity_metadata (
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        last_event_id TEXT NOT NULL,
+        last_client_timestamp TEXT NOT NULL,
+        last_op TEXT,
+        last_seq BIGINT NOT NULL,
+        PRIMARY KEY(entity, entity_id)
+      );
+      CREATE TABLE sync_applied_events (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        seq BIGINT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_table_state (
+        table_name TEXT PRIMARY KEY NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_incremental_apply_at TEXT
+      );
+      CREATE TABLE accounts (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL,
+        "group" TEXT,
+        currency TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        platform_id TEXT,
+        account_number TEXT,
+        meta TEXT,
+        provider TEXT,
+        provider_account_id TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        tracking_mode TEXT NOT NULL DEFAULT 'NOT_SET'
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 12, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version) VALUES (1, 4);
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      eventBus,
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "PULL_TAIL", cursor: 13 });
+        }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          return Response.json({
+            from: 12,
+            to: 13,
+            next_cursor: 13,
+            has_more: false,
+            events: [
+              {
+                event_id: "remote-event-1",
+                device_id: "device-2",
+                type: "account.create.v1",
+                entity: "account",
+                entity_id: accountId,
+                client_timestamp: "2026-01-02T00:00:00Z",
+                payload: encryptedPayload,
+                payload_key_version: 1,
+                user_id: "user-1",
+                team_id: "team-1",
+                server_timestamp: "2026-01-02T00:00:01Z",
+                seq: 13,
+              },
+            ],
+          });
+        }
+        return Response.json({
+          id: "device-1",
+          display_name: "MacBook",
+          trust_state: "trusted",
+          trusted_key_version: 1,
+        });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        lockVersion: 5,
+        pulledCount: 1,
+        cursor: 13,
+      });
+      expect(events).toEqual([DEVICE_SYNC_PULL_COMPLETE_EVENT]);
+      expect(
+        db
+          .query<
+            { name: string; currency: string },
+            [string]
+          >("SELECT name, currency FROM accounts WHERE id = ?")
+          .get(accountId),
+      ).toEqual({ name: "Synced account", currency: "USD" });
     } finally {
       db.close();
     }

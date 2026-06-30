@@ -4274,6 +4274,7 @@ export function createLocalConnectDeviceSyncService({
           env,
           fetchImpl,
           restoreDeviceSyncSession,
+          eventBus,
         );
         const cycleStatus = optionalString(cycleResult.status);
         if (cycleStatus === "not_ready" || cycleStatus === "config_error") {
@@ -4568,6 +4569,7 @@ export function createLocalConnectDeviceSyncService({
         env,
         fetchImpl,
         restoreDeviceSyncSession,
+        eventBus,
       );
     },
     cancelDeviceSnapshotUpload() {
@@ -8060,6 +8062,7 @@ async function triggerLocalDeviceSyncCycle(
   env: NodeJS.ProcessEnv,
   fetchImpl: typeof fetch,
   restoreSession?: RestoreConnectSession,
+  eventBus?: BackendEventBus,
 ): Promise<Record<string, unknown>> {
   const cursor =
     db.query<SyncCursorRow, []>("SELECT cursor FROM sync_cursor WHERE id = 1").get()?.cursor ?? 0;
@@ -8189,6 +8192,7 @@ async function triggerLocalDeviceSyncCycle(
       }
       markLocalSyncCycleOutcome(db, "ok");
       localPruneAppliedEventsAfterSuccessfulCycle(db, pullResult.cursor);
+      publishLocalPullCompleteEvent(eventBus, pullResult.pulledCount);
       return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
         pulledCount: pullResult.pulledCount,
       });
@@ -8270,6 +8274,7 @@ async function triggerLocalDeviceSyncCycle(
         }
         markLocalSyncCycleOutcome(db, "ok");
         localPruneAppliedEventsAfterSuccessfulCycle(db, pullResult.cursor);
+        publishLocalPullCompleteEvent(eventBus, pullResult.pulledCount);
         return localSyncCycleResult("ok", acquiredLockVersion, pullResult.cursor, null, null, {
           pushedCount: pushResult.pushedCount,
           pulledCount: pullResult.pulledCount,
@@ -8294,6 +8299,15 @@ async function triggerLocalDeviceSyncCycle(
     }
     markLocalSyncCycleError(db, "state_error", `Failed to read sync state: ${errorMessage(error)}`);
     return localSyncCycleResult("state_error", lockVersion, cursor);
+  }
+}
+
+function publishLocalPullCompleteEvent(
+  eventBus: BackendEventBus | undefined,
+  pulledCount: number,
+): void {
+  if (pulledCount > 0) {
+    eventBus?.publish({ name: DEVICE_SYNC_PULL_COMPLETE_EVENT });
   }
 }
 

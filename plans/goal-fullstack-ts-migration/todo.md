@@ -7786,6 +7786,12 @@ contract:
   and uses all instrument-bearing holdings for severity denominator, while the
   backoff reset test asserts the engine starts before counting cycles. Focused
   health/connect tests and full repository check passed.
+- `pr5-device-sync-pull-complete-event`: verification passed. Incremental
+  device-sync pulls now publish the `device_sync_pull_complete` domain event
+  after at least one remote replay event is applied, matching Rust
+  `ReplayStore::on_pull_complete` behavior so downstream portfolio jobs are
+  triggered outside snapshot bootstrap restores. Focused Connect tests and
+  backend type-check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

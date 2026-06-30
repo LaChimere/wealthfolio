@@ -6224,6 +6224,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   all instrument-bearing holdings for severity denominator; the not-ready
   backoff reset test now proves the background engine starts before counting
   cycles. Focused health/connect tests and full repository check passed.
+- Turn 1130: Added device-sync pull-complete event parity. Incremental
+  device-sync pulls now publish `device_sync_pull_complete` after at least one
+  remote replay event is applied, matching Rust `ReplayStore::on_pull_complete`
+  behavior so downstream portfolio jobs run after pull replay. Focused Connect
+  tests and full repository check passed.
 
 ## Deferred items
 
