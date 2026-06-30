@@ -8206,7 +8206,11 @@ async function triggerLocalDeviceSyncCycle(
         deadLetterCount: pushResult.deadLetterCount,
       });
     }
-    throw deviceSyncDisabled();
+    throw new ConnectServiceError(
+      "internal_error",
+      `Unsupported reconcile action: ${reconcile.action ?? "<missing>"}`,
+      500,
+    );
   } catch (error) {
     if (error instanceof ConnectNotImplementedError) {
       throw error;
