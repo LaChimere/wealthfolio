@@ -184,4 +184,33 @@ describe("addon development mode", () => {
       expect(globals[addon.globalName]).toBe(true);
     }
   });
+
+  it("rejects dev addons without a valid enable export", async () => {
+    const blobUrl = "data:text/javascript,export%20const%20metadata%20%3D%20%7B%7D";
+    URL.createObjectURL = (() => blobUrl) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    vi.spyOn(URL, "createObjectURL").mockReturnValue(blobUrl);
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    (globalThis as unknown as { ReactDOM?: { createPortal: () => null } }).ReactDOM = {
+      createPortal: () => null,
+    };
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/health")) {
+        return new Response(null, { status: 200 });
+      }
+      if (url.endsWith("/addon.js")) {
+        return new Response("export const metadata = {}", { status: 200 });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    addonDevManager.registerDevServer({ id: "invalid-addon", name: "Invalid Addon", port: 3001 });
+
+    await expect(addonDevManager.loadAddonFromDevServer("invalid-addon")).resolves.toBe(false);
+
+    expect(addonDevManager.getStatus().servers).toContainEqual(
+      expect.objectContaining({ id: "invalid-addon", status: "error" }),
+    );
+  });
 });

@@ -7744,6 +7744,11 @@ contract:
   and safe server request ID metadata in error messages, while unsafe server
   request IDs remain suppressed and outbound requests only send the client
   request header. Full Connect tests and full repository check passed.
+- `pr5-addon-dev-invalid-export-parity`: verification passed. Development-server
+  add-ons without a valid enable export now fail load and mark the dev server
+  errored instead of reporting success with no running instance, matching
+  installed add-on invalid-export behavior. Focused frontend add-on tests and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

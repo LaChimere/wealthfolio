@@ -6184,6 +6184,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   and safe server request ID metadata in error messages, while unsafe server
   request IDs remain suppressed and outbound requests only send the client
   request header. Full Connect tests and full repository check passed.
+- Turn 1122: Aligned add-on dev-mode invalid export handling with installed
+  add-ons. Development server add-ons without a valid enable export now fail
+  load and mark the dev server errored instead of reporting success with no
+  running instance. Focused frontend add-on tests and full repository check
+  passed.
 
 ## Deferred items
 

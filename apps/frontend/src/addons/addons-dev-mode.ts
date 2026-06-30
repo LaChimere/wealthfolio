@@ -244,6 +244,12 @@ class AddonDevManager {
             g2.__DEV_ADDONS__ = g2.__DEV_ADDONS__ ?? new Map();
             g2.__DEV_ADDONS__.set(addonId, typedAddonInstance);
           }
+        } else {
+          throw new Error(
+            `Addon ${addonId} does not export a valid enable function. Available exports: ${Object.keys(
+              asRecord,
+            ).join(", ")}`,
+          );
         }
       } finally {
         if (blobUrl) {
