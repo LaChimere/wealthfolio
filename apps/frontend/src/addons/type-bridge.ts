@@ -157,6 +157,7 @@ export interface InternalHostAPI {
   listenPortfolioUpdateError<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
   listenMarketSyncStart<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
   listenMarketSyncComplete<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
+  listenMarketSyncError<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
 
   // Activity import
   importActivities(params: { activities: ActivityImport[] }): Promise<ImportActivitiesResult>;
@@ -331,6 +332,7 @@ const PERMISSION_PATHS_BY_CATEGORY: Record<string, Record<string, readonly strin
     onUpdateError: ["api.events.portfolio.onUpdateError"],
     onSyncStart: ["api.events.market.onSyncStart"],
     onSyncComplete: ["api.events.market.onSyncComplete"],
+    onSyncError: ["api.events.market.onSyncError"],
   },
   "events.import": {
     onDropHover: ["api.events.import.onDropHover"],
@@ -345,6 +347,7 @@ const PERMISSION_PATHS_BY_CATEGORY: Record<string, Record<string, readonly strin
   "events.market": {
     onSyncStart: ["api.events.market.onSyncStart"],
     onSyncComplete: ["api.events.market.onSyncComplete"],
+    onSyncError: ["api.events.market.onSyncError"],
   },
   secrets: {
     set: ["api.secrets.set"],
@@ -705,6 +708,10 @@ export function createSDKHostAPIBridge(
         onSyncComplete: <T>(handler: EventCallback<T>) => {
           permissionGuard.assertAllowed("api.events.market.onSyncComplete");
           return internalAPI.listenMarketSyncComplete(handler);
+        },
+        onSyncError: <T>(handler: EventCallback<T>) => {
+          permissionGuard.assertAllowed("api.events.market.onSyncError");
+          return internalAPI.listenMarketSyncError(handler);
         },
       },
     },

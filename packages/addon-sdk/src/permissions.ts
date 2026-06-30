@@ -197,6 +197,7 @@ export const PERMISSION_CATEGORIES: PermissionCategory[] = [
       'onUpdateError',
       'onSyncStart',
       'onSyncComplete',
+      'onSyncError',
     ],
     riskLevel: 'low',
   },

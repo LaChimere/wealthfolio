@@ -4,6 +4,7 @@ import {
   listenBrokerSyncStart,
   listenFileDrop,
   listenMarketSyncComplete,
+  listenMarketSyncError,
   listenPortfolioUpdateStart,
 } from "./events";
 
@@ -55,10 +56,12 @@ describe("web event adapter", () => {
     vi.stubGlobal("EventSource", MockEventSource);
     const portfolioHandler = vi.fn();
     const marketHandler = vi.fn();
+    const marketErrorHandler = vi.fn();
     const brokerHandler = vi.fn();
 
     const unlistenPortfolio = await listenPortfolioUpdateStart(portfolioHandler);
     const unlistenMarket = await listenMarketSyncComplete(marketHandler);
+    const unlistenMarketError = await listenMarketSyncError(marketErrorHandler);
     const unlistenBroker = await listenBrokerSyncStart(brokerHandler);
     const eventSource = MockEventSource.instances[0];
 
@@ -72,6 +75,7 @@ describe("web event adapter", () => {
     };
     eventSource.dispatch("portfolio:update-start", JSON.stringify({ accountId: "account-1" }));
     eventSource.dispatch("market:sync-complete", JSON.stringify(marketPayload));
+    eventSource.dispatch("market:sync-error", "Provider unavailable");
     eventSource.dispatch("broker:sync-start", "plain payload");
 
     expect(portfolioHandler).toHaveBeenCalledWith({
@@ -84,20 +88,27 @@ describe("web event adapter", () => {
       id: 2,
       payload: marketPayload,
     });
+    expect(marketErrorHandler).toHaveBeenCalledWith({
+      event: "market:sync-error",
+      id: 3,
+      payload: "Provider unavailable",
+    });
     expect(brokerHandler).toHaveBeenCalledWith({
       event: "broker:sync-start",
-      id: 3,
+      id: 4,
       payload: "plain payload",
     });
 
     await unlistenPortfolio();
     expect(eventSource.closed).toBe(false);
     await unlistenMarket();
+    await unlistenMarketError();
     await unlistenBroker();
     expect(eventSource.closed).toBe(true);
     expect(eventSource.removed.map((entry) => entry.eventName)).toEqual([
       "portfolio:update-start",
       "market:sync-complete",
+      "market:sync-error",
       "broker:sync-start",
     ]);
   });

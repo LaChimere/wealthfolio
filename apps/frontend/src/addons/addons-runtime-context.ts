@@ -72,6 +72,7 @@ import {
 } from "@/adapters";
 import {
   listenMarketSyncComplete,
+  listenMarketSyncError,
   listenMarketSyncStart,
   listenPortfolioUpdateComplete,
   listenPortfolioUpdateError,
@@ -345,6 +346,7 @@ export function createAddonContext(
           listenPortfolioUpdateError,
           listenMarketSyncStart,
           listenMarketSyncComplete,
+          listenMarketSyncError,
 
           // Activity import
           importActivities,

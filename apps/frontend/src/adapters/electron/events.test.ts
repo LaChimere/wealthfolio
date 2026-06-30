@@ -9,6 +9,7 @@ import {
   listenDatabaseRestored,
   listenNavigateToRoute,
   listenMarketSyncComplete,
+  listenMarketSyncError,
   listenPortfolioUpdateStart,
   listenUpdateAvailable,
   listenUpdateDownloadProgress,
@@ -35,11 +36,14 @@ describe("electron event adapter", () => {
 
     const portfolioHandler = vi.fn();
     const marketHandler = vi.fn();
+    const marketErrorHandler = vi.fn();
     await listenPortfolioUpdateStart(portfolioHandler);
     await listenMarketSyncComplete(marketHandler);
+    await listenMarketSyncError(marketErrorHandler);
 
     expect(listen).toHaveBeenCalledWith("portfolio:update-start", expect.any(Function));
     expect(listen).toHaveBeenCalledWith("market:sync-complete", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("market:sync-error", expect.any(Function));
 
     const [, portfolioBridgeHandler] = listen.mock.calls[0];
     portfolioBridgeHandler({ event: "portfolio:update-start", id: 1, payload: { ok: true } });
@@ -63,6 +67,18 @@ describe("electron event adapter", () => {
       event: "market:sync-complete",
       id: 2,
       payload: marketPayload,
+    });
+
+    const [, marketErrorBridgeHandler] = listen.mock.calls[2];
+    marketErrorBridgeHandler({
+      event: "market:sync-error",
+      id: 3,
+      payload: "Provider unavailable",
+    });
+    expect(marketErrorHandler).toHaveBeenCalledWith({
+      event: "market:sync-error",
+      id: 3,
+      payload: "Provider unavailable",
     });
   });
 

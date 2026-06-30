@@ -207,20 +207,25 @@ describe("Addon Type Bridge", () => {
 
     it("passes market sync completion payloads through permitted add-on event APIs", async () => {
       const listenMarketSyncComplete = vi.fn().mockResolvedValue(vi.fn());
+      const listenMarketSyncError = vi.fn().mockResolvedValue(vi.fn());
       const sdkAPI = createSDKHostAPIBridge(
         {
           listenMarketSyncComplete,
+          listenMarketSyncError,
         } as Partial<InternalHostAPI> as InternalHostAPI,
         "market-addon",
         createAddonPermissionGuard({
           addonId: "market-addon",
-          permissions: [declaredPermission("events.market", ["onSyncComplete"])],
+          permissions: [declaredPermission("events.market", ["onSyncComplete", "onSyncError"])],
         }),
       );
       const handler = vi.fn();
+      const errorHandler = vi.fn();
 
       await sdkAPI.events.market.onSyncComplete(handler);
+      await sdkAPI.events.market.onSyncError(errorHandler);
       expect(listenMarketSyncComplete).toHaveBeenCalledWith(handler);
+      expect(listenMarketSyncError).toHaveBeenCalledWith(errorHandler);
 
       const marketPayload = {
         failed_syncs: [["BAD", "Symbol not found: BAD"]],
@@ -237,6 +242,21 @@ describe("Addon Type Bridge", () => {
         event: "market:sync-complete",
         id: 1,
         payload: marketPayload,
+      });
+
+      const errorBridgeHandler = listenMarketSyncError.mock.calls[0]?.[0] as (
+        event: unknown,
+      ) => void;
+      errorBridgeHandler({
+        event: "market:sync-error",
+        id: 2,
+        payload: "Provider unavailable",
+      });
+
+      expect(errorHandler).toHaveBeenCalledWith({
+        event: "market:sync-error",
+        id: 2,
+        payload: "Provider unavailable",
       });
     });
 

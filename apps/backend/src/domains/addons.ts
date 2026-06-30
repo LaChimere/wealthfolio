@@ -204,6 +204,7 @@ const PERMISSION_PATTERNS = [
       "onUpdateError",
       "onSyncStart",
       "onSyncComplete",
+      "onSyncError",
     ],
     "Access to application events",
   ],

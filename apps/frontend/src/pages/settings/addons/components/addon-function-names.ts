@@ -101,6 +101,7 @@ export const FUNCTION_DISPLAY_NAMES: Record<string, string> = {
   // EventsAPI functions - Market events
   "events.market.onSyncStart": "Monitor market sync start",
   "events.market.onSyncComplete": "Monitor market sync completion",
+  "events.market.onSyncError": "Monitor market sync errors",
 
   // UI functions (addon extensions) - these use dotted notation in backend detection
   "ui.sidebar.addItem": "Add navigation items",

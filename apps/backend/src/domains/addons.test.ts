@@ -199,7 +199,8 @@ describe("TS addon domain", () => {
           },
         ],
       }),
-      "pkg/dist/addon.js": "ctx.api.portfolio.getHoldings(); ctx.api.market.sync();",
+      "pkg/dist/addon.js":
+        "ctx.api.portfolio.getHoldings(); ctx.api.market.sync(); ctx.api.events.market.onSyncError(() => {});",
     });
 
     const extracted = (await service.extractAddonZip({ zipData })) as TestExtractedAddon;
@@ -229,6 +230,18 @@ describe("TS addon domain", () => {
             functions: [
               {
                 name: "sync",
+                isDeclared: false,
+                isDetected: true,
+                detectedAt: expect.stringMatching(/\+00:00$/) as string,
+              },
+            ],
+          },
+          {
+            category: "events",
+            purpose: "Access to application events",
+            functions: [
+              {
+                name: "onSyncError",
                 isDeclared: false,
                 isDetected: true,
                 detectedAt: expect.stringMatching(/\+00:00$/) as string,

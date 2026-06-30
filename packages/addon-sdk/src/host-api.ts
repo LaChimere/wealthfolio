@@ -642,6 +642,13 @@ export interface EventsAPI {
      * @returns Promise resolving to unlisten function
      */
     onSyncComplete<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
+
+    /**
+     * Listen for market sync error events
+     * @param handler Event handler
+     * @returns Promise resolving to unlisten function
+     */
+    onSyncError<T>(handler: EventCallback<T>): Promise<UnlistenFn>;
   };
 }
 
