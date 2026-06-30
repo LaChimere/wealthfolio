@@ -1227,6 +1227,110 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("surfaces runtime price staleness health issues from stale provider quotes", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-price-stale-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const db = openSqliteDatabase(runtime.dbPath);
+    try {
+      db.prepare(
+        "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES ('timezone', 'UTC')",
+      ).run();
+      db.prepare(
+        `
+          INSERT INTO accounts (
+            id, name, account_type, "group", currency, is_default, is_active,
+            is_archived, tracking_mode
+          )
+          VALUES ('price-stale-account', 'Price Stale Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+        `,
+      ).run();
+      seedRuntimeAsset(db, "price-stale-asset");
+      db.prepare(
+        "UPDATE assets SET name = ?, display_code = ?, instrument_symbol = ? WHERE id = ?",
+      ).run("Price Stale Asset", "STALE", "STALE", "price-stale-asset");
+      db.prepare(
+        `
+          INSERT INTO holdings_snapshots (
+            id, account_id, snapshot_date, currency, positions, cash_balances,
+            cost_basis, net_contribution, net_contribution_base, source
+          )
+          VALUES ('price-stale-account_2026-06-30', 'price-stale-account', '2026-06-30', 'USD',
+            ?, '{}', '0', '0', '0', 'MANUAL_ENTRY')
+        `,
+      ).run(
+        JSON.stringify({
+          "price-stale-asset": {
+            id: "price-stale-asset_price-stale-account",
+            accountId: "price-stale-account",
+            assetId: "price-stale-asset",
+            quantity: "10",
+            averageCost: "0",
+            totalCostBasis: "0",
+            currency: "USD",
+            inceptionDate: "2026-06-30T00:00:00Z",
+            createdAt: "2026-06-30T00:00:00Z",
+            lastUpdated: "2026-06-30T00:00:00Z",
+            isAlternative: false,
+            contractMultiplier: "1",
+            lots: [],
+          },
+        }),
+      );
+      db.prepare(
+        `
+          INSERT INTO quotes (
+            id, asset_id, day, source, close, currency, created_at, timestamp
+          )
+          VALUES ('price-stale-asset_2026-05-01_YAHOO', 'price-stale-asset', '2026-05-01',
+            'YAHOO', '10', 'USD', '2026-05-01T16:00:00Z', '2026-05-01T16:00:00Z')
+        `,
+      ).run();
+    } finally {
+      db.close();
+    }
+    const server = startBackendServer(config, runtime.options);
+
+    try {
+      const response = await fetch(`${server.baseUrl}/api/v1/health/check`, {
+        method: "POST",
+        headers: { "x-client-timezone": "UTC" },
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        overallSeverity: "CRITICAL",
+        issueCounts: { CRITICAL: 1 },
+        issues: [
+          expect.objectContaining({
+            id: expect.stringMatching(/^price_stale:error:/),
+            severity: "CRITICAL",
+            category: "PRICE_STALENESS",
+            title: "Outdated price for 1 holding",
+            message:
+              "Some holdings haven't had prices updated in over 3 days. Your portfolio value may be inaccurate.",
+            affectedCount: 1,
+            affectedItems: [
+              {
+                id: "price-stale-asset",
+                name: "Price Stale Asset",
+                symbol: "STALE",
+                route: "/holdings/price-stale-asset",
+              },
+            ],
+            fixAction: { id: "sync_prices", label: "Sync Prices", payload: ["price-stale-asset"] },
+            details: "1. STALE (Price Stale Asset) - outdated",
+          }),
+        ],
+      });
+    } finally {
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("wires runtime health issue dismissal and restore routes", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-health-dismissals-"));
     const runtime = createSqliteBackedBackendServices({
