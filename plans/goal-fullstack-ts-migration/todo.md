@@ -7651,6 +7651,10 @@ contract:
   `installAddonFile` error, and web/Electron tests now cover that unsupported
   single-file install paths do not leak file contents or invoke Electron.
   Focused frontend adapter tests and full repository check passed.
+- `pr5-addon-adapter-install-file-dual-review`: verification passed. Claude Opus
+  4.8 xhigh and GPT-5.5 xhigh reviewed unsupported add-on file install hardening
+  and confirmed the web adapter no longer leaks file contents, Electron remains
+  non-invoked, tests are meaningful, and status docs are accurate.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
