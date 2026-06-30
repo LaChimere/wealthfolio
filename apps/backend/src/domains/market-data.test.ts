@@ -4417,7 +4417,7 @@ describe("TS market data domain", () => {
           exchangeName: "TSX",
           currency: "CAD",
           currencySource: "exchange_inferred",
-          dataSource: "FINNHUB",
+          dataSource: "YAHOO",
           score: 42,
         }),
       ]);
