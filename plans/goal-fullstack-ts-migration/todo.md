@@ -7699,6 +7699,11 @@ contract:
   confirm-with-bootstrap, direct flow begin, overwrite approval, and waiting
   snapshot polling completion. Focused device-sync tests and full repository
   check passed.
+- `pr5-runtime-device-sync-post-bootstrap-cycle`: verification passed. The
+  SQLite-backed pairing-flow state route now proves snapshot apply triggers the
+  wired post-bootstrap device-sync cycle by returning a NOOP reconcile response
+  and asserting sync engine status is reset to `ok` before the flow is removed.
+  Focused runtime test and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

@@ -17259,6 +17259,9 @@ describe("TS backend runtime composition", () => {
             },
           });
         }
+        if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
         return Response.json({
           cursor: 0,
           latest_snapshot: null,
@@ -17320,6 +17323,11 @@ describe("TS backend runtime composition", () => {
             device_id, key_version, trust_state, last_bootstrap_at, min_snapshot_created_at
           )
           VALUES ('device-runtime', 2, 'trusted', NULL, NULL);
+          UPDATE sync_engine_state SET
+            last_cycle_status = 'pre_bootstrap',
+            last_error = 'stale',
+            consecutive_failures = 2
+          WHERE id = 1;
         `);
       } finally {
         seedDb.close();
@@ -17375,6 +17383,20 @@ describe("TS backend runtime composition", () => {
         expect(
           verifyDb
             .query<
+              {
+                last_cycle_status: string | null;
+                last_error: string | null;
+                consecutive_failures: number;
+              },
+              []
+            >(
+              "SELECT last_cycle_status, last_error, consecutive_failures FROM sync_engine_state WHERE id = 1",
+            )
+            .get(),
+        ).toEqual({ last_cycle_status: "ok", last_error: null, consecutive_failures: 0 });
+        expect(
+          verifyDb
+            .query<
               { min_snapshot_created_at: string | null },
               []
             >("SELECT min_snapshot_created_at FROM sync_device_config WHERE device_id = 'device-runtime'")
@@ -17385,6 +17407,9 @@ describe("TS backend runtime composition", () => {
       }
       expect(deviceSyncRequests).toContain(
         "https://api.example.test/api/v1/sync/snapshots/019bb9fe-f707-71e9-a40d-733575f4f246",
+      );
+      expect(deviceSyncRequests).toContain(
+        "https://api.example.test/api/v1/sync/events/reconcile-ready-state",
       );
       const missingStateResponse = await fetch(
         jsonRequest("/api/v1/sync/pairing/flow/state", { flowId }),

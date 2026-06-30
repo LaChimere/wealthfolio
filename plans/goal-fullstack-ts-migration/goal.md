@@ -6144,6 +6144,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   confirm-with-bootstrap, direct flow begin, overwrite approval, and waiting
   snapshot polling completion. Focused device-sync tests and full repository
   check passed.
+- Turn 1114: Strengthened runtime post-bootstrap evidence. The SQLite-backed
+  pairing-flow state route now proves snapshot apply triggers the wired
+  post-bootstrap device-sync cycle by returning a NOOP reconcile response and
+  asserting sync engine status is reset to `ok` before the flow is removed.
+  Focused runtime test and full repository check passed.
 
 ## Deferred items
 
