@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1043
+turns_used: 1044
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T12:55:51+09:00"
+updated_at: "2026-06-30T13:00:14+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5792,6 +5792,11 @@ updated_at: "2026-06-30T12:55:51+09:00"
 - Turn 1043: Ran dual-model unsupported replay review with Claude Opus 4.8 xhigh
   and GPT-5.5 xhigh. Both reviews found no actionable classification, cursor,
   decrypt-ordering, test-validity, or runtime regression issues.
+- Turn 1044: Reclassified unknown Connect reconcile actions after trigger-cycle
+  migration. READY trigger-cycle now records `state_error` for unknown future
+  reconcile actions instead of bubbling a stale `not_implemented` disabled
+  error, preserving cursor state and an actionable engine error. Trigger-cycle
+  runtime tests, backend type-check, and full repository check passed.
 
 ## Deferred items
 
