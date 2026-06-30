@@ -7334,6 +7334,11 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed the bootstrap gate reclassification and
   found no actionable error classification, precondition, waiting-state, runtime
   regression, or test-validity issues.
+- `pr5-device-sync-unsupported-replay-error`: verification passed. Unknown
+  remote sync events now fail pull replay as `internal_error`/`pull_error`
+  instead of bubbling a stale `not_implemented` disabled error, preserving the
+  local cursor and recording an actionable engine error. Trigger-cycle runtime
+  tests, backend type-check, and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

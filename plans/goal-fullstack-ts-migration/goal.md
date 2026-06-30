@@ -4,11 +4,11 @@
 objective: "开始为项目进行全栈迁移至 ts。你可以多进行深度调研来了解项目，实现的时候进行原子化 commit，并且频繁进行多轮 review 和 refine 来及时确保项目采用的是最佳实践的方式来实现和迁移的。你的最终目的是完整迁移。"
 status: active
 slug: "goal-fullstack-ts-migration"
-turns_used: 1041
+turns_used: 1042
 turn_budget: null
 docs_update_approved: true
 created_at: "2026-05-13T21:33:49+08:00"
-updated_at: "2026-06-30T12:42:42+09:00"
+updated_at: "2026-06-30T12:48:23+09:00"
 <!-- prettier-ignore-end -->
 
 ## Acceptance criteria
@@ -5783,6 +5783,12 @@ updated_at: "2026-06-30T12:42:42+09:00"
   4.8 xhigh and GPT-5.5 xhigh. Both reviews found no actionable error
   classification, precondition, waiting-state, runtime regression, or test
   validity issues.
+- Turn 1042: Reclassified unsupported device-sync replay events after migrated
+  entity coverage. Unknown remote sync events now fail the pull as
+  `internal_error`/`pull_error` instead of bubbling a stale `not_implemented`
+  disabled error, preserving the local cursor and recording an actionable engine
+  error. Trigger-cycle runtime tests, backend type-check, and full repository
+  check passed.
 
 ## Deferred items
 
