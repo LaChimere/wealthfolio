@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { AccountService } from "./accounts";
 import type { ActivityService } from "./activities";
+import type { GoalService } from "./goals";
 import {
   createDataExportService,
   exportFileName,
@@ -12,6 +13,8 @@ import {
 
 const unusedAccountService = {} as AccountService;
 const unusedActivityService = {} as ActivityService;
+const unusedGoalService = {} as GoalService;
+const unusedValuationGetter = () => Promise.resolve([]);
 
 describe("TS data export domain", () => {
   test("parses export route segments with Rust-compatible case sensitivity", () => {
@@ -40,6 +43,8 @@ describe("TS data export domain", () => {
     const service = createDataExportService({
       db,
       accountService: unusedAccountService,
+      goalService: unusedGoalService,
+      getHistoricalValuations: unusedValuationGetter,
       activityService: {
         searchActivities(request) {
           searchRequests.push(request);
@@ -83,6 +88,7 @@ describe("TS data export domain", () => {
       db,
       accountService: unusedAccountService,
       activityService: unusedActivityService,
+      goalService: unusedGoalService,
       getHistoricalValuations(accountId, startDate, endDate) {
         valuationCalls.push({ accountId, startDate, endDate });
         return Promise.resolve([{ accountId, date: "2026-06-17", value: "123.45" }]);

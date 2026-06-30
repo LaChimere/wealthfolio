@@ -14,8 +14,8 @@ export interface DataExportServiceOptions {
   db: Database;
   accountService: AccountService;
   activityService: ActivityService;
-  goalService?: GoalService;
-  getHistoricalValuations?: (
+  goalService: GoalService;
+  getHistoricalValuations: (
     accountId: string,
     startDate?: string | null,
     endDate?: string | null,
@@ -90,16 +90,10 @@ export function createDataExportService(options: DataExportServiceOptions): Data
         return result.data.length > 0 ? result.data : null;
       }
       case "goals": {
-        if (!goalService) {
-          throw new Error("Goal service not available for export");
-        }
         const goals = await goalService.getGoals();
         return goals.length > 0 ? goals : null;
       }
       case "portfolio-history": {
-        if (!valuationGetter) {
-          throw new Error("Valuation service not available for export");
-        }
         const records = await valuationGetter(PORTFOLIO_TOTAL_ACCOUNT_ID, null, null);
         return Array.isArray(records) && records.length > 0 ? records : null;
       }
