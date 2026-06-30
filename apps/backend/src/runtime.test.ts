@@ -181,17 +181,6 @@ describe("TS backend runtime composition", () => {
       } finally {
         seedDb.close();
       }
-      const { holdingsService } = runtime.options;
-      if (!holdingsService) {
-        throw new Error("Runtime AI tool stream test requires holdings service");
-      }
-      await holdingsService.saveManualHoldings({
-        accountId: "ai-tool-account",
-        snapshotDate: "2026-04-02",
-        holdings: [],
-        cashBalances: { USD: "42" },
-      });
-
       const clearResponse = await fetch(`${server.baseUrl}/api/v1/connect/session`, {
         method: "DELETE",
       });
@@ -2691,6 +2680,16 @@ describe("TS backend runtime composition", () => {
       } finally {
         seedDb.close();
       }
+      const { holdingsService } = runtime.options;
+      if (!holdingsService) {
+        throw new Error("Runtime AI tool stream test requires holdings service");
+      }
+      await holdingsService.saveManualHoldings({
+        accountId: "ai-tool-account",
+        snapshotDate: "2026-04-02",
+        holdings: [],
+        cashBalances: { USD: "42" },
+      });
 
       const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
         method: "PUT",
@@ -2766,7 +2765,16 @@ describe("TS backend runtime composition", () => {
             result: expect.objectContaining({
               toolName: "get_cash_balances",
               success: true,
-              data: expect.objectContaining({ baseCurrency: "USD" }),
+              data: expect.objectContaining({
+                baseCurrency: "USD",
+                grandTotalBase: 42,
+                accounts: [
+                  expect.objectContaining({
+                    accountId: "ai-tool-account",
+                    totalBaseCurrency: 42,
+                  }),
+                ],
+              }),
             }),
           }),
         ]),
