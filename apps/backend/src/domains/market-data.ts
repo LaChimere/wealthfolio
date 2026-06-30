@@ -97,6 +97,10 @@ export interface YahooDividend {
 
 export interface SymbolSearchResult {
   symbol: string;
+  canonicalSymbol?: string | null;
+  canonicalExchangeMic?: string | null;
+  providerId?: string | null;
+  providerSymbol?: string | null;
   shortName: string;
   longName: string;
   exchange: string;
@@ -107,6 +111,7 @@ export interface SymbolSearchResult {
   currency?: string | null;
   currencySource?: string | null;
   dataSource?: string | null;
+  quoteMode?: string | null;
   isExisting: boolean;
   existingAssetId?: string | null;
   index: string;
@@ -312,6 +317,7 @@ interface AssetSearchRow {
   instrument_exchange_mic: string | null;
   instrument_key: string | null;
   provider_config: string | null;
+  quote_mode: string;
 }
 
 interface NormalizedQuoteImport {
@@ -1795,7 +1801,7 @@ async function searchSymbols(
   fetchImpl: typeof fetch,
   secretService: SecretService | undefined,
 ): Promise<SymbolSearchResult[]> {
-  const existingSummaries = readSearchAssets(db, query).map((asset) =>
+  const existingSummaries = readSearchAssets(db, query, exchangeCatalog).map((asset) =>
     assetToSearchResult(asset, exchangeCatalog),
   );
   const existingAssetIds = new Set(existingSummaries.map((summary) => summary.existingAssetId));
@@ -1895,26 +1901,53 @@ function providerSearchFallbacks(
   return fallbacks;
 }
 
-function readSearchAssets(db: Database, query: string): AssetSearchRow[] {
+function readSearchAssets(
+  db: Database,
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+): AssetSearchRow[] {
   const like = `%${query.toLowerCase()}%`;
+  const suffixedQuery = localYahooSuffixedQuery(query, exchangeCatalog);
+  const clauses = [
+    "lower(COALESCE(display_code, '')) LIKE ?",
+    "lower(COALESCE(instrument_symbol, '')) LIKE ?",
+    "lower(COALESCE(name, '')) LIKE ?",
+  ];
+  const params = [like, like, like];
+  if (suffixedQuery) {
+    clauses.push(
+      "(lower(COALESCE(instrument_symbol, '')) = ? AND upper(COALESCE(instrument_exchange_mic, '')) = ?)",
+    );
+    params.push(suffixedQuery.symbol.toLowerCase(), suffixedQuery.exchangeMic);
+  }
   return db
-    .query<AssetSearchRow, [string, string, string]>(
+    .query<AssetSearchRow, string[]>(
       `
         SELECT
-          id, kind, name, display_code, quote_ccy, instrument_type, instrument_symbol,
+          id, kind, name, display_code, quote_ccy, quote_mode, instrument_type, instrument_symbol,
           instrument_exchange_mic, instrument_key, provider_config
         FROM assets
         WHERE kind != 'FX'
-          AND (
-            lower(COALESCE(display_code, '')) LIKE ?
-            OR lower(COALESCE(instrument_symbol, '')) LIKE ?
-            OR lower(COALESCE(name, '')) LIKE ?
-          )
+          AND (${clauses.join(" OR ")})
         ORDER BY display_code ASC
         LIMIT 50
       `,
     )
-    .all(like, like, like);
+    .all(...params);
+}
+
+function localYahooSuffixedQuery(
+  query: string,
+  exchangeCatalog: ExchangeCatalog,
+): { symbol: string; exchangeMic: string } | null {
+  const trimmed = query.trim();
+  const dotIndex = trimmed.lastIndexOf(".");
+  if (dotIndex <= 0) {
+    return null;
+  }
+  const exchangeMic = yahooSuffixToMic(trimmed, exchangeCatalog);
+  const symbol = trimmed.slice(0, dotIndex).trim();
+  return exchangeMic && symbol ? { symbol, exchangeMic } : null;
 }
 
 function readAssetsByInstrumentKey(
@@ -1929,7 +1962,7 @@ function readAssetsByInstrumentKey(
     .query<AssetSearchRow, string[]>(
       `
         SELECT
-          id, kind, name, display_code, quote_ccy, instrument_type, instrument_symbol,
+          id, kind, name, display_code, quote_ccy, quote_mode, instrument_type, instrument_symbol,
           instrument_exchange_mic, instrument_key, provider_config
         FROM assets
         WHERE instrument_key IN (${placeholders})
@@ -1949,16 +1982,22 @@ function assetToSearchResult(
   asset: AssetSearchRow,
   exchangeCatalog: ExchangeCatalog,
 ): SymbolSearchResult {
-  const display = asset.display_code ?? asset.instrument_symbol ?? "";
+  const storedDisplay = asset.display_code ?? asset.instrument_symbol ?? "";
+  const display = assetSearchDisplaySymbol(asset, exchangeCatalog);
   const exchangeMic = asset.instrument_exchange_mic;
   const exchangeName = exchangeMic
     ? (exchangeCatalog.nameByMic.get(exchangeMic.toUpperCase()) ?? null)
     : null;
   const quoteType = quoteTypeForInstrumentType(asset.instrument_type);
+  const providerId = preferredProvider(asset.provider_config);
   return {
     symbol: display,
-    shortName: asset.name ?? display,
-    longName: asset.name ?? display,
+    canonicalSymbol: asset.instrument_symbol,
+    canonicalExchangeMic: exchangeMic,
+    providerId,
+    providerSymbol: null,
+    shortName: asset.name ?? storedDisplay,
+    longName: asset.name ?? storedDisplay,
     exchange: exchangeName ?? "",
     exchangeMic,
     exchangeName,
@@ -1966,12 +2005,29 @@ function assetToSearchResult(
     typeDisplay: quoteType,
     currency: asset.quote_ccy,
     currencySource: null,
-    dataSource: preferredProvider(asset.provider_config) ?? "MANUAL",
+    dataSource: asset.quote_mode === "MANUAL" ? "MANUAL" : providerId,
+    quoteMode: asset.quote_mode,
     isExisting: true,
     existingAssetId: asset.id,
     index: "",
     score: 100,
   };
+}
+
+function assetSearchDisplaySymbol(asset: AssetSearchRow, exchangeCatalog: ExchangeCatalog): string {
+  const storedDisplay = asset.display_code ?? asset.instrument_symbol ?? "";
+  const instrumentSymbol = optionalString(asset.instrument_symbol);
+  if (
+    normalizeInstrumentType(asset.instrument_type ?? undefined) !== "EQUITY" ||
+    instrumentSymbol === null ||
+    storedDisplay.trim().toUpperCase() !== instrumentSymbol.toUpperCase()
+  ) {
+    return storedDisplay;
+  }
+
+  const exchangeMic = optionalString(asset.instrument_exchange_mic)?.toUpperCase();
+  const suffix = exchangeMic ? exchangeCatalog.yahooSuffixByMic.get(exchangeMic) : undefined;
+  return suffix ? `${instrumentSymbol}.${suffix}` : storedDisplay;
 }
 
 async function searchYahooSymbols(

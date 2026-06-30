@@ -4305,7 +4305,11 @@ describe("TS market data domain", () => {
 
       expect(await service.searchSymbol?.("AZN")).toEqual([
         {
-          symbol: "AZN",
+          symbol: "AZN.L",
+          canonicalSymbol: "AZN",
+          canonicalExchangeMic: "XLON",
+          providerId: "YAHOO",
+          providerSymbol: null,
           shortName: "AstraZeneca existing",
           longName: "AstraZeneca existing",
           exchange: "LSE",
@@ -4316,6 +4320,7 @@ describe("TS market data domain", () => {
           currency: "GBp",
           currencySource: null,
           dataSource: "YAHOO",
+          quoteMode: "MARKET",
           isExisting: true,
           existingAssetId: "EQUITY:AZN@XLON",
           index: "",
@@ -4368,11 +4373,94 @@ describe("TS market data domain", () => {
       expect(await service.searchSymbol?.("apple")).toMatchObject([
         {
           symbol: "AAPL",
+          canonicalSymbol: "AAPL",
+          canonicalExchangeMic: "XNAS",
+          providerId: null,
+          providerSymbol: null,
+          quoteMode: "MARKET",
           isExisting: true,
           existingAssetId: "EQUITY:AAPL@XNAS",
-          dataSource: "MANUAL",
+          dataSource: null,
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search finds Yahoo-suffixed existing assets without provider availability", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = (() => Promise.reject(new Error("network unavailable"))) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "EQUITY:AZN@XLON",
+        name: "AstraZeneca existing",
+        display_code: "AZN",
+        instrument_type: "EQUITY",
+        instrument_symbol: "AZN",
+        instrument_exchange_mic: "XLON",
+        instrument_key: "EQUITY:AZN@XLON",
+        provider_config: JSON.stringify({ preferred_provider: "YAHOO" }),
+        quote_ccy: "GBp",
+      });
+
+      expect(await service.searchSymbol?.("AZN.L")).toMatchObject([
+        {
+          symbol: "AZN.L",
+          canonicalSymbol: "AZN",
+          canonicalExchangeMic: "XLON",
+          providerId: "YAHOO",
+          providerSymbol: null,
+          quoteMode: "MARKET",
+          isExisting: true,
+          existingAssetId: "EQUITY:AZN@XLON",
+          dataSource: "YAHOO",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("search maps manual existing assets with Rust-compatible metadata", async () => {
+    const db = createMarketDataDb();
+    const fetchImpl = (() => Promise.reject(new Error("network unavailable"))) as typeof fetch;
+    const service = createMarketDataService(db, {
+      exchangeCatalogJson: testExchangeCatalogJson(),
+      fetch: fetchImpl,
+    });
+
+    try {
+      insertAsset(db, {
+        id: "MANUAL:ART",
+        name: null,
+        display_code: "ART",
+        instrument_type: null,
+        instrument_symbol: null,
+        instrument_exchange_mic: null,
+        instrument_key: null,
+        quote_mode: "MANUAL",
+        provider_config: null,
+        quote_ccy: "USD",
+      });
+
+      expect((await service.searchSymbol?.("ART"))[0]).toMatchObject({
+        symbol: "ART",
+        canonicalSymbol: null,
+        canonicalExchangeMic: null,
+        providerId: null,
+        providerSymbol: null,
+        shortName: "ART",
+        longName: "ART",
+        dataSource: "MANUAL",
+        quoteMode: "MANUAL",
+        isExisting: true,
+      });
     } finally {
       db.close();
     }

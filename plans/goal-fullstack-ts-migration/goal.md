@@ -6174,6 +6174,11 @@ updated_at: "2026-07-01T00:39:21+09:00"
   asset resolutions, and validation-shaped pre-pass errors fall back to normal
   bulk per-entry `errors[]` handling. Focused bulk activity tests and full
   repository check passed.
+- Turn 1120: Aligned existing-asset market-data search metadata. Local
+  existing-asset search results now expose Rust-compatible canonical symbol,
+  canonical exchange MIC, provider ID, provider symbol, quote mode, manual data
+  source handling, and Yahoo-suffixed equity display symbols. Full market-data
+  tests and full repository check passed.
 
 ## Deferred items
 

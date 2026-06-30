@@ -7733,6 +7733,12 @@ contract:
   sibling lookups settle and validation-shaped pre-pass errors defer to normal
   per-entry `errors[]` handling. Focused bulk activity tests and full repository
   check passed.
+- `pr5-market-data-existing-search-metadata`: verification passed:
+  `bun test apps/backend/src/domains/market-data.test.ts` and
+  `bun run --cwd apps/backend type-check -- --pretty false`. Coverage includes
+  existing-asset search results returning Rust-compatible canonical symbol,
+  canonical exchange MIC, provider ID, provider symbol, quote mode, manual data
+  source, and Yahoo-suffixed equity display symbols.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
