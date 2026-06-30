@@ -7357,6 +7357,11 @@ contract:
   4.8 xhigh and GPT-5.5 xhigh reviewed the final reconcile parity correction and
   found no actionable Rust parity, branch ordering, pending-outbox,
   cursor/lock-state, test-validity, or overbroad unknown-action handling issues.
+- `pr5-addon-sdk-sync-error-permission-test`: verification passed. The add-on
+  SDK package now has a Bun test proving `events.market.onSyncError` is exposed
+  by `PERMISSION_CATEGORIES`, recognized by `isPermissionRequired`, and
+  classified as low risk. Focused SDK test, addon-sdk type-check, and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
