@@ -2,6 +2,8 @@ import { ELECTRON_API_KEY, type WealthfolioElectronApi } from "@wealthfolio/elec
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  listenBrokerSyncComplete,
+  listenBrokerSyncError,
   listenDeepLink,
   listenFileDrop,
   listenFileDropCancelled,
@@ -37,13 +39,19 @@ describe("electron event adapter", () => {
     const portfolioHandler = vi.fn();
     const marketHandler = vi.fn();
     const marketErrorHandler = vi.fn();
+    const brokerCompleteHandler = vi.fn();
+    const brokerErrorHandler = vi.fn();
     await listenPortfolioUpdateStart(portfolioHandler);
     await listenMarketSyncComplete(marketHandler);
     await listenMarketSyncError(marketErrorHandler);
+    await listenBrokerSyncComplete(brokerCompleteHandler);
+    await listenBrokerSyncError(brokerErrorHandler);
 
     expect(listen).toHaveBeenCalledWith("portfolio:update-start", expect.any(Function));
     expect(listen).toHaveBeenCalledWith("market:sync-complete", expect.any(Function));
     expect(listen).toHaveBeenCalledWith("market:sync-error", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("broker:sync-complete", expect.any(Function));
+    expect(listen).toHaveBeenCalledWith("broker:sync-error", expect.any(Function));
 
     const [, portfolioBridgeHandler] = listen.mock.calls[0];
     portfolioBridgeHandler({ event: "portfolio:update-start", id: 1, payload: { ok: true } });
@@ -79,6 +87,36 @@ describe("electron event adapter", () => {
       event: "market:sync-error",
       id: 3,
       payload: "Provider unavailable",
+    });
+
+    const brokerCompletePayload = {
+      success: true,
+      message: "Sync completed.",
+      accountsSynced: { created: 1, updated: 0, skipped: 0 },
+    };
+    const [, brokerCompleteBridgeHandler] = listen.mock.calls[3];
+    brokerCompleteBridgeHandler({
+      event: "broker:sync-complete",
+      id: 4,
+      payload: brokerCompletePayload,
+    });
+    expect(brokerCompleteHandler).toHaveBeenCalledWith({
+      event: "broker:sync-complete",
+      id: 4,
+      payload: brokerCompletePayload,
+    });
+
+    const brokerErrorPayload = { error: "Broker API unavailable" };
+    const [, brokerErrorBridgeHandler] = listen.mock.calls[4];
+    brokerErrorBridgeHandler({
+      event: "broker:sync-error",
+      id: 5,
+      payload: brokerErrorPayload,
+    });
+    expect(brokerErrorHandler).toHaveBeenCalledWith({
+      event: "broker:sync-error",
+      id: 5,
+      payload: brokerErrorPayload,
     });
   });
 

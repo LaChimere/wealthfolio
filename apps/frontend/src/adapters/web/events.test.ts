@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  listenBrokerSyncComplete,
+  listenBrokerSyncError,
   listenBrokerSyncStart,
   listenFileDrop,
   listenMarketSyncComplete,
@@ -58,11 +60,15 @@ describe("web event adapter", () => {
     const marketHandler = vi.fn();
     const marketErrorHandler = vi.fn();
     const brokerHandler = vi.fn();
+    const brokerCompleteHandler = vi.fn();
+    const brokerErrorHandler = vi.fn();
 
     const unlistenPortfolio = await listenPortfolioUpdateStart(portfolioHandler);
     const unlistenMarket = await listenMarketSyncComplete(marketHandler);
     const unlistenMarketError = await listenMarketSyncError(marketErrorHandler);
     const unlistenBroker = await listenBrokerSyncStart(brokerHandler);
+    const unlistenBrokerComplete = await listenBrokerSyncComplete(brokerCompleteHandler);
+    const unlistenBrokerError = await listenBrokerSyncError(brokerErrorHandler);
     const eventSource = MockEventSource.instances[0];
 
     expect(MockEventSource.instances).toHaveLength(1);
@@ -73,10 +79,18 @@ describe("web event adapter", () => {
       failed_syncs: [["BAD", "Symbol not found: BAD"]],
       skipped_reasons: [["SKIP", "Provider not supported for market sync: LEGACY_PROVIDER"]],
     };
+    const brokerCompletePayload = {
+      success: true,
+      message: "Sync completed.",
+      accountsSynced: { created: 1, updated: 0, skipped: 0 },
+    };
+    const brokerErrorPayload = { error: "Broker API unavailable" };
     eventSource.dispatch("portfolio:update-start", JSON.stringify({ accountId: "account-1" }));
     eventSource.dispatch("market:sync-complete", JSON.stringify(marketPayload));
     eventSource.dispatch("market:sync-error", "Provider unavailable");
     eventSource.dispatch("broker:sync-start", "plain payload");
+    eventSource.dispatch("broker:sync-complete", JSON.stringify(brokerCompletePayload));
+    eventSource.dispatch("broker:sync-error", JSON.stringify(brokerErrorPayload));
 
     expect(portfolioHandler).toHaveBeenCalledWith({
       event: "portfolio:update-start",
@@ -98,18 +112,32 @@ describe("web event adapter", () => {
       id: 4,
       payload: "plain payload",
     });
+    expect(brokerCompleteHandler).toHaveBeenCalledWith({
+      event: "broker:sync-complete",
+      id: 5,
+      payload: brokerCompletePayload,
+    });
+    expect(brokerErrorHandler).toHaveBeenCalledWith({
+      event: "broker:sync-error",
+      id: 6,
+      payload: brokerErrorPayload,
+    });
 
     await unlistenPortfolio();
     expect(eventSource.closed).toBe(false);
     await unlistenMarket();
     await unlistenMarketError();
     await unlistenBroker();
+    await unlistenBrokerComplete();
+    await unlistenBrokerError();
     expect(eventSource.closed).toBe(true);
     expect(eventSource.removed.map((entry) => entry.eventName)).toEqual([
       "portfolio:update-start",
       "market:sync-complete",
       "market:sync-error",
       "broker:sync-start",
+      "broker:sync-complete",
+      "broker:sync-error",
     ]);
   });
 
