@@ -7628,6 +7628,11 @@ contract:
   changed to `FINNHUB`; it now correctly expects `dataSource: "YAHOO"` while the
   real Finnhub fallback assertions remain `FINNHUB`. Focused market-data/runtime
   tests and full repository check passed.
+- `pr5-runtime-background-engine-status-evidence`: verification passed. The
+  `/connect/device/start-background` runtime smoke now proves the background
+  cycle marks engine status with `lastCycleStatus: "ok"`, not only that a
+  reconcile network request was issued. Focused runtime test and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market

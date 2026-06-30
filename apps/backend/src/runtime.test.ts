@@ -12827,7 +12827,10 @@ describe("TS backend runtime composition", () => {
       );
       const statusResponse = await fetch(`${server.baseUrl}/api/v1/connect/device/engine-status`);
       expect(statusResponse.status).toBe(200);
-      await expect(statusResponse.json()).resolves.toMatchObject({ backgroundRunning: true });
+      await expect(statusResponse.json()).resolves.toMatchObject({
+        backgroundRunning: true,
+        lastCycleStatus: "ok",
+      });
 
       const firstRequestCount = deviceSyncRequests.length;
       const createResponse = await fetch(`${server.baseUrl}/api/v1/accounts`, {
