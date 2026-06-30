@@ -254,6 +254,7 @@ pub fn detect_addon_permissions(addon_files: &[AddonFile]) -> Vec<AddonPermissio
                 // Market events
                 "onSyncStart",
                 "onSyncComplete",
+                "onSyncError",
             ],
             "Access to application events",
         ),

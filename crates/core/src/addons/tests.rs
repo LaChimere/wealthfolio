@@ -174,6 +174,7 @@ fn test_detect_addon_permissions() {
                 function helper() {
                     return ctx.api.market.searchTicker('AAPL');
                 }
+                ctx.api.events.market.onSyncError(() => {});
             "#
             .to_string(),
             is_main: false,
@@ -249,6 +250,25 @@ fn test_detect_addon_permissions() {
     assert!(
         market_functions.contains(&"searchTicker"),
         "searchTicker should be detected"
+    );
+
+    let events_permission = detected_permissions
+        .iter()
+        .find(|p| p.category == "events");
+    assert!(
+        events_permission.is_some(),
+        "Events permissions should be detected"
+    );
+
+    let events_permission = events_permission.unwrap();
+    let event_functions: Vec<&str> = events_permission
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(
+        event_functions.contains(&"onSyncError"),
+        "onSyncError should be detected"
     );
 }
 
