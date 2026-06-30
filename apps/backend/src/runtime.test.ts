@@ -4693,7 +4693,16 @@ describe("TS backend runtime composition", () => {
           return Response.json({ access_token: "access-token", refresh_token: "refresh-token" });
         }
         if (url.endsWith("/api/v1/sync/events/reconcile-ready-state")) {
-          return Response.json({ action: "FUTURE_ACTION", cursor: 9 });
+          return Response.json({ action: "FUTURE_ACTION", cursor: 10 });
+        }
+        if (url.endsWith("/api/v1/sync/events/pull?since=9&limit=500")) {
+          return Response.json({
+            from: 9,
+            to: 10,
+            next_cursor: 10,
+            has_more: false,
+            events: [],
+          });
         }
         return Response.json({
           id: "device-runtime",
@@ -4746,11 +4755,16 @@ describe("TS backend runtime composition", () => {
       await expect(triggerResponse.json()).resolves.toMatchObject({
         status: "ok",
         lockVersion: 5,
-        cursor: 9,
+        cursor: 10,
       });
 
       const verifyDb = openSqliteDatabase(runtime.dbPath);
       try {
+        expect(
+          verifyDb
+            .query<{ cursor: number }, []>("SELECT cursor FROM sync_cursor WHERE id = 1")
+            .get(),
+        ).toEqual({ cursor: 10 });
         expect(
           verifyDb
             .query<
