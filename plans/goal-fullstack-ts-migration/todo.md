@@ -7216,6 +7216,12 @@ contract:
   coverage, proving WARNING severity, DATA_CONSISTENCY category, Rust-shaped
   message text, affected counts, and holdings navigation through the HTTP seam.
   Full runtime suite and full repository check passed.
+- `pr5-health-negative-balance-issue-runtime`: verification passed. The runtime
+  `/api/v1/health/check` route now strengthens valuation-backed negative balance
+  coverage, proving WARNING/INFO severities, DATA_CONSISTENCY category,
+  Rust-shaped message text, affected account routes, activity navigation, and
+  details text through the HTTP seam. Full runtime suite and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
