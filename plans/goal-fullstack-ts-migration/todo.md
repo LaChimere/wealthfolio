@@ -7362,6 +7362,11 @@ contract:
   by `PERMISSION_CATEGORIES`, recognized by `isPermissionRequired`, and
   classified as low risk. Focused SDK test, addon-sdk type-check, and full
   repository check passed.
+- `pr5-connect-unknown-reconcile-pending-push-evidence`: verification passed.
+  The runtime trigger-cycle push smoke now proves unknown but well-formed
+  reconcile actions with pending outbox rows take the normal push path, encrypt
+  and submit the outbox event, and mark it sent. Trigger-cycle runtime tests and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
