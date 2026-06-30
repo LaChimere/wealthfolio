@@ -7255,6 +7255,12 @@ contract:
   the Rust-shaped `{ failed_syncs, skipped_reasons }` object payload emitted by
   the TS backend SSE stream. Focused frontend adapter validation, frontend
   type-check, and full repository check passed.
+- `pr5-electron-event-bridge-market-sync-payload`: verification passed. The
+  Electron sidecar event bridge parser now has coverage proving
+  `market:sync-complete` SSE messages preserve the Rust-shaped
+  `{ failed_syncs, skipped_reasons }` object payload for desktop IPC forwarding.
+  Focused Electron event validation, Electron type-check, and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
