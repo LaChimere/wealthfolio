@@ -3965,6 +3965,176 @@ describe("TS backend runtime composition", () => {
     }
   });
 
+  test("streams runtime AI chat holdings tool results through provider follow-up", async () => {
+    const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-ai-holdings-tool-"));
+    const runtime = createSqliteBackedBackendServices({
+      appDataDir,
+      repositoryRoot,
+      secretKey: config.secretKey,
+    });
+    const server = startBackendServer(config, runtime.options);
+    const originalFetch = globalThis.fetch;
+    const providerBodies: Array<Record<string, unknown>> = [];
+
+    try {
+      const seedDb = openSqliteDatabase(runtime.dbPath);
+      try {
+        seedDb
+          .prepare(
+            `
+              INSERT INTO accounts (
+                id, name, account_type, "group", currency, is_default, is_active,
+                is_archived, tracking_mode
+              )
+              VALUES ('ai-holdings-account', 'AI Holdings Account', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+            `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+              INSERT INTO assets (
+                id, kind, name, display_code, notes, metadata, is_active,
+                quote_mode, quote_ccy, instrument_type, instrument_symbol,
+                instrument_exchange_mic, provider_config, created_at, updated_at
+              )
+              VALUES (
+                'ai-holdings-asset', 'INVESTMENT', 'AI Holding Asset', 'AIHOLD', NULL, NULL, 1,
+                'MARKET', 'USD', 'EQUITY', 'AIHOLD', 'XNAS', NULL,
+                '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z'
+              )
+            `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+              INSERT INTO quotes (
+                id, asset_id, day, source, close, currency, created_at, timestamp
+              )
+              VALUES (
+                'ai-holdings-quote', 'ai-holdings-asset', '2026-01-02', 'MANUAL',
+                '12', 'USD', '2026-01-02T16:00:00Z', '2026-01-02T16:00:00Z'
+              )
+            `,
+          )
+          .run();
+        seedDb
+          .prepare(
+            `
+              INSERT INTO holdings_snapshots (
+                id, account_id, snapshot_date, currency, positions, cash_balances,
+                cost_basis, net_contribution, net_contribution_base, source
+              )
+              VALUES (
+                'ai-holdings-snapshot', 'ai-holdings-account', '2026-01-02', 'USD',
+                ?, '{"USD":"5"}', '30', '35', '35', 'MANUAL_ENTRY'
+              )
+            `,
+          )
+          .run(
+            JSON.stringify({
+              "ai-holdings-asset": {
+                assetId: "ai-holdings-asset",
+                quantity: "3",
+                totalCostBasis: "30",
+                currency: "USD",
+                inceptionDate: "2026-01-02T00:00:00Z",
+                contractMultiplier: "1",
+              },
+            }),
+          );
+      } finally {
+        seedDb.close();
+      }
+
+      const updateResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/settings`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "ollama",
+          enabled: true,
+          selectedModel: "qwen3.5:9b",
+          toolsAllowlist: ["get_holdings"],
+        }),
+      });
+      expect(updateResponse.status).toBe(200);
+
+      const defaultResponse = await fetch(`${server.baseUrl}/api/v1/ai/providers/default`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerId: "ollama" }),
+      });
+      expect(defaultResponse.status).toBe(200);
+
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input);
+        if (url.startsWith(server.baseUrl)) {
+          return originalFetch(input, init);
+        }
+        const body = JSON.parse(String(init?.body));
+        if (body.stream === false) {
+          return new Response("title unavailable", { status: 503 });
+        }
+        providerBodies.push(body);
+        if (providerBodies.length === 1) {
+          return new Response(
+            '{"message":{"tool_calls":[{"id":"runtime-holdings-call","function":{"name":"get_holdings","arguments":{"accountId":"ai-holdings-account","viewMode":"table"}}}]},"done":false}\n{"done":true}\n',
+            { headers: { "content-type": "application/x-ndjson" } },
+          );
+        }
+        return new Response(
+          '{"message":{"content":"Holdings loaded."},"done":false}\n{"done":true}\n',
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      }) as typeof fetch;
+
+      const streamResponse = await fetch(`${server.baseUrl}/api/v1/ai/chat/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: "Show holdings" }),
+      });
+      expect(streamResponse.status).toBe(200);
+      const events = (await streamResponse.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events.map((event) => event.type)).toEqual([
+        "system",
+        "toolCall",
+        "toolResult",
+        "textDelta",
+        "done",
+      ]);
+      const exposedToolNames = (
+        (providerBodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>
+      ).map((tool) => tool.function?.name);
+      expect(exposedToolNames).toEqual(["get_holdings"]);
+      expect(JSON.stringify(events)).toContain('"symbol":"AIHOLD"');
+      expect(JSON.stringify(events)).toContain('"quantity":3');
+      const holdingsToolMessage = (
+        (providerBodies[1]?.messages ?? []) as Array<{ role?: string; content?: string }>
+      ).find((message) => message.role === "tool");
+      expect(JSON.parse(String(holdingsToolMessage?.content))).toMatchObject({
+        accountScope: "ai-holdings-account",
+        viewMode: "table",
+        currency: "USD",
+        holdings: [
+          expect.objectContaining({
+            account: "AI Holdings Account",
+            symbol: "AIHOLD",
+            name: "AI Holding Asset",
+            quantity: 3,
+          }),
+        ],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      server.stop();
+      await runtime.close();
+    }
+  });
+
   test("registers an FX asset when creating a non-base account in runtime", async () => {
     const appDataDir = mkdtempSync(path.join(tmpdir(), "wealthfolio-runtime-account-fx-"));
     const runtime = createSqliteBackedBackendServices({

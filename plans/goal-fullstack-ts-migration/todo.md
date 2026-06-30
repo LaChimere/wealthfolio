@@ -7532,6 +7532,12 @@ contract:
   tool execution proof, provider follow-up assertions, fixture validity,
   cleanup, allowlist filtering, no-persistence assertions, or plan/todo
   consistency.
+- `pr5-runtime-ai-get-holdings-tool`: verification passed. The standalone TS
+  runtime now proves `/api/v1/ai/chat/stream` can execute `get_holdings` against
+  persisted holdings snapshot, asset, and quote rows, expose only the allowed
+  holdings tool, stream Rust-shaped holdings payloads, and pass parsed holdings
+  into the follow-up provider request. Focused runtime AI tests and full
+  repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
