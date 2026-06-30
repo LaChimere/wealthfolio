@@ -7381,6 +7381,11 @@ contract:
   and GPT-5.5 xhigh reviewed add-on SDK and backend-contracts test integration
   and found no actionable script, runner, CI ordering, workspace,
   duplicate/missing check, false-positive, or full-check issues.
+- `pr5-addon-canary-sync-error-event`: verification passed. The
+  backend-contracts add-on host canary now includes `market:sync-error`,
+  guarding that the backend event producer, web EventSource adapter, and
+  Electron adapter all keep the new market sync error event visible alongside
+  sync-complete. Backend-contracts tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
