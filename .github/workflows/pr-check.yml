@@ -54,6 +54,9 @@ jobs:
       - name: Run Electron tests
         run: bun run test:electron
 
+      - name: Run add-on SDK tests
+        run: bun run test:addon-sdk
+
       - name: Build frontend
         run: bun run build
 

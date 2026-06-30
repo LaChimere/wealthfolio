@@ -156,6 +156,9 @@ if [[ "$RUN_FRONTEND" == "true" ]]; then
     echo "=== bun test:electron ===" >&2
     bun run test:electron
 
+    echo "=== bun test:addon-sdk ===" >&2
+    bun run test:addon-sdk
+
     echo "=== bun build ===" >&2
     bun run build
   fi

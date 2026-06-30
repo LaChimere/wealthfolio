@@ -53,6 +53,7 @@
     "lint:quiet": "eslint . --quiet",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "test": "bun test",
     "type-check": "tsc --noEmit",
     "build:types": "tsc -p tsconfig.json",
     "prepack": "bun run build"
