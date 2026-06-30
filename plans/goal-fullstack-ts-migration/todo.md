@@ -7348,6 +7348,11 @@ contract:
   like the legacy Rust engine, while malformed actions still produce
   `state_error`. Trigger-cycle runtime tests, backend type-check, and full
   repository check passed.
+- `pr5-connect-unknown-reconcile-pull-tail-evidence`: verification passed. The
+  runtime smoke now proves a future reconcile action with a higher cursor enters
+  the pull flow, fetches the tail page, advances the local cursor, clears stale
+  sync errors, and returns `ok`. Trigger-cycle runtime tests and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
