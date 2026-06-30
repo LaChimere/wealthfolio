@@ -7431,6 +7431,12 @@ contract:
   applies provider-specific symbol overrides, persists the quote, and updates
   quote sync state through the standalone TS runtime. Focused runtime tests and
   full repository check passed.
+- `pr5-runtime-general-custom-provider-history`: verification passed. The
+  market-data sync route now proves a `CUSTOM_SCRAPER` asset without
+  `custom_provider_code` can select a persisted historical custom source, apply
+  source-specific symbol overrides, fetch historical rows, persist multiple
+  provider quotes, and update quote sync state through the standalone TS
+  runtime. Focused runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
