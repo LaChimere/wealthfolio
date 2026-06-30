@@ -12998,6 +12998,9 @@ describe("TS backend runtime composition", () => {
       expect(deviceSyncRequests).toEqual([
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
       ]);
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
+        "device-runtime",
+      );
     } finally {
       server.stop();
       await runtime.close();
@@ -13086,6 +13089,9 @@ describe("TS backend runtime composition", () => {
         "https://api.example.test/api/v1/sync/team/devices/device-runtime",
         "https://api.example.test/api/v1/sync/team/devices?scope=my",
       ]);
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
+        "device-runtime",
+      );
     } finally {
       server.stop();
       await runtime.close();
@@ -13153,6 +13159,9 @@ describe("TS backend runtime composition", () => {
         "https://api.example.test/api/v1/sync/team/devices?scope=my",
         "https://api.example.test/api/v1/sync/team/keys/initialize",
       ]);
+      expect(await runtime.options.secretService?.getSecret("sync_device_id")).toBe(
+        "device-runtime",
+      );
     } finally {
       server.stop();
       await runtime.close();

@@ -6949,6 +6949,7 @@ describe("TS Connect device sync local service", () => {
         needsPairing: false,
         trustedDevices: [],
       });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
     } finally {
       db.close();
     }
@@ -7425,6 +7426,7 @@ describe("TS Connect device sync local service", () => {
         rootKey: "legacy-root-key",
         keyVersion: 2,
       });
+      expect(secretService.entries.get("sync_device_id")).toBe("device-1");
     } finally {
       db.close();
     }
