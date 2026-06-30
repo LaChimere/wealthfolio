@@ -3457,6 +3457,64 @@ describe("TS activities import domain", () => {
     }
   });
 
+  test("provider-resolves partial direct transfer updates using existing quantity", async () => {
+    const db = createActivitiesDb();
+    const service = createActivityService(db, {
+      exchangeMetadata: {
+        currencyByMic: new Map([["XNYS", "USD"]]),
+        yahooSuffixToMic: new Map(),
+      },
+      symbolSearch: () => [
+        {
+          symbol: "SHOP",
+          shortName: "Shopify Provider",
+          longName: "Shopify Provider",
+          exchange: "NYSE",
+          exchangeMic: "XNYS",
+          exchangeName: "NYSE",
+          quoteType: "EQUITY",
+          typeDisplay: "",
+          currency: "USD",
+          dataSource: "FINNHUB",
+          isExisting: false,
+          index: "",
+          score: 1,
+        },
+      ],
+    });
+
+    try {
+      insertAccount(db, { id: "account-1", name: "Alpha", currency: "USD" });
+      insertActivity(db, {
+        id: "transfer-update-provider",
+        accountId: "account-1",
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        quantity: "2",
+        unitPrice: null,
+        amount: null,
+        currency: "USD",
+      });
+
+      const updated = (await service.updateActivity?.({
+        id: "transfer-update-provider",
+        accountId: "account-1",
+        asset: { symbol: "SHOP" },
+        activityType: "TRANSFER_IN",
+        activityDate: "2025-01-18",
+        currency: "USD",
+      })) as Activity;
+
+      expect(readAssetById(db, updated.assetId ?? "")).toMatchObject({
+        display_code: "SHOP",
+        instrument_exchange_mic: "XNYS",
+      });
+      expect(updated.quantity).toBe("2");
+    } finally {
+      db.close();
+    }
+  });
+
   test("matches existing assets after Yahoo suffix canonicalization like Rust", () => {
     const db = createActivitiesDb();
     const service = createActivityService(db, {

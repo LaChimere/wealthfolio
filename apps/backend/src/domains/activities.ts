@@ -671,10 +671,15 @@ export function createActivityService(
     updateActivity(input) {
       if (options.ensureFxPairs || options.symbolSearch) {
         return (async () => {
-          const resolvedInput = await directActivityInputWithProviderResolution(db, input, options);
           const assetContext = createActivityAssetResolutionContext(options.exchangeMetadata);
-          const activityId = requiredNonEmptyString(resolvedInput.id, "id");
+          const activityId = requiredNonEmptyString(input.id, "id");
           const existing = readActivityRow(db, activityId);
+          const resolvedInput = await directActivityInputWithProviderResolution(
+            db,
+            input,
+            options,
+            existing,
+          );
           const update = normalizeActivityUpdateInput(db, resolvedInput, existing, assetContext);
           const assetQuoteMode = activityAssetQuoteModeFromRecord(resolvedInput);
           const shouldWriteQuote = shouldWriteManualQuoteForUpdate(resolvedInput);
@@ -2272,6 +2277,7 @@ async function directActivityInputWithProviderResolution(
   db: Database,
   input: Record<string, unknown>,
   options: ActivityServiceOptions,
+  existing?: ActivityRow,
 ): Promise<Record<string, unknown>> {
   if (!options.symbolSearch) {
     return input;
@@ -2285,16 +2291,17 @@ async function directActivityInputWithProviderResolution(
   ) {
     return input;
   }
-  const activityType = optionalTrimmedString(input.activityType);
+  const activityType = optionalTrimmedString(input.activityType) ?? existing?.activity_type;
   if (!activityType) {
     return input;
   }
+  const subtype = directActivityEffectiveSubtype(input, existing);
   const disposition = importSymbolDisposition(
     activityType,
-    optionalTrimmedString(input.subtype) ?? null,
+    subtype,
     assetInput.symbol,
-    parseOptionalImportDecimal(input.quantity),
-    parseOptionalImportDecimal(input.unitPrice),
+    directActivityEffectiveDecimal(input, "quantity", existing?.quantity),
+    directActivityEffectiveDecimal(input, "unitPrice", existing?.unit_price),
   );
   if (disposition.kind !== "resolve") {
     return input;
@@ -2355,6 +2362,35 @@ async function directActivityInputWithProviderResolution(
       ...(assetInput.name || !resolution.name ? {} : { name: resolution.name }),
     },
   };
+}
+
+function directActivityEffectiveSubtype(
+  input: Record<string, unknown>,
+  existing: ActivityRow | undefined,
+): string | null {
+  if (!existing) {
+    return optionalTrimmedString(input.subtype) ?? null;
+  }
+  const patch = parseSubtypePatch(input);
+  switch (patch.kind) {
+    case "set":
+      return patch.value;
+    case "clear":
+      return null;
+    case "omit":
+      return existing.subtype;
+  }
+}
+
+function directActivityEffectiveDecimal(
+  input: Record<string, unknown>,
+  field: "quantity" | "unitPrice",
+  existingValue: string | null | undefined,
+): Decimal | null {
+  if (existingValue !== undefined && !hasOwn(input, field)) {
+    return parseOptionalImportDecimal(existingValue);
+  }
+  return parseOptionalImportDecimal(input[field]);
 }
 
 async function checkActivitiesImportRows(

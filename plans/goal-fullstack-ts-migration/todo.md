@@ -7671,6 +7671,11 @@ contract:
   the market-data search seam before staging a new activity-created asset,
   matching direct create behavior while preserving existing update paths.
   Focused activity unit/runtime tests and full repository check passed.
+- `pr5-direct-activity-provider-partial-transfer-fix`: verification passed.
+  Partial transfer updates now resolve provider-backed symbols using existing
+  quantity/unit-price values when those numeric fields are omitted, so valid
+  symbol-only transfer patches do not skip provider resolution. Focused activity
+  unit/runtime tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
