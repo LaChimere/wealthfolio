@@ -20476,7 +20476,8 @@ describe("TS backend runtime composition", () => {
             )
             VALUES
               ('portfolio-scope-account-1', 'Scope One', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
-              ('portfolio-scope-account-2', 'Scope Two', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
+              ('portfolio-scope-account-2', 'Scope Two', 'CASH', NULL, 'USD', 0, 1, 0, 'HOLDINGS'),
+              ('portfolio-scope-excluded', 'Scope Excluded', 'SECURITIES', NULL, 'USD', 0, 1, 0, 'HOLDINGS')
           `,
         ).run();
       } finally {
@@ -20492,19 +20493,62 @@ describe("TS backend runtime composition", () => {
       expect(createResponse.status).toBe(200);
       const created = (await createResponse.json()) as { id: string };
       const portfolioFilter = { type: "Portfolio", portfolioId: created.id };
+      const { holdingsService } = runtime.options;
+      if (!holdingsService) {
+        throw new Error("Runtime Portfolio scope test requires holdings service");
+      }
+      await holdingsService.saveManualHoldings({
+        accountId: "portfolio-scope-account-1",
+        snapshotDate: "2026-04-02",
+        holdings: [
+          {
+            symbol: "INCL",
+            quantity: "2",
+            averageCost: "5",
+            currency: "USD",
+            name: "Included Scoped Asset",
+          },
+        ],
+        cashBalances: { USD: "25" },
+      });
+      await holdingsService.saveManualHoldings({
+        accountId: "portfolio-scope-excluded",
+        snapshotDate: "2026-04-02",
+        holdings: [
+          {
+            symbol: "EXCL",
+            quantity: "9",
+            averageCost: "100",
+            currency: "USD",
+            name: "Excluded Scoped Asset",
+          },
+        ],
+        cashBalances: { USD: "999" },
+      });
 
       const holdingsResponse = await postJson("/api/v1/holdings/query", {
         filter: portfolioFilter,
       });
       expect(holdingsResponse.status).toBe(200);
-      await expect(holdingsResponse.json()).resolves.toEqual([]);
+      const scopedHoldings = (await holdingsResponse.json()) as Array<{
+        instrument?: { symbol?: string };
+        sourceAccountIds?: string[];
+      }>;
+      const scopedSymbols = scopedHoldings.map((holding) => holding.instrument?.symbol);
+      expect(scopedSymbols).toContain("INCL");
+      expect(scopedSymbols).not.toContain("EXCL");
+      expect(scopedHoldings.find((holding) => holding.instrument?.symbol === "INCL")).toMatchObject(
+        {
+          sourceAccountIds: ["portfolio-scope-account-1"],
+        },
+      );
 
       const allocationsResponse = await postJson("/api/v1/allocations/query", {
         filter: portfolioFilter,
       });
       expect(allocationsResponse.status).toBe(200);
       await expect(allocationsResponse.json()).resolves.toMatchObject({
-        totalValue: 0,
+        totalValue: 25,
         customGroups: [],
       });
 
