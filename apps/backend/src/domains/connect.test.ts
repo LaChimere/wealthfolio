@@ -10168,6 +10168,430 @@ describe("TS Connect device sync local service", () => {
     }
   });
 
+  test("pushes encrypted outbox events to cloud and marks them sent", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const rootKey = Buffer.from(new Uint8Array(32).fill(11)).toString("base64");
+    const crypto = createSyncCryptoService({
+      randomBytes: (size) => new Uint8Array(size).fill(5),
+    });
+    const dek = (await crypto.deriveDek(rootKey, 1)).value;
+    const pushPayload = JSON.stringify({ id: "acct-uuid", name: "My Account" });
+    const encryptedPayload = (await crypto.encrypt(dek, pushPayload)).value;
+    const accountId = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-uuid-1', 'account', '${accountId}', 'create', '2026-01-01T00:00:00Z',
+        '${pushPayload}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    const pushRequests: Array<{ url: string; body: unknown }> = [];
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 1,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as unknown;
+          pushRequests.push({ url, body });
+          return Response.json({
+            accepted: [{ event_id: "event-uuid-1" }],
+            duplicate: [],
+            server_cursor: 6,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/pull")) {
+          return Response.json({ from: 5, to: 6, next_cursor: 6, has_more: false, events: [] });
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "ok",
+        pushedCount: 1,
+        pulledCount: 0,
+        cursor: 6,
+        deadLetterCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { sent: number; status: string },
+            []
+          >("SELECT sent, status FROM sync_outbox WHERE event_id = 'event-uuid-1'")
+          .get(),
+      ).toEqual({ sent: 1, status: "sent" });
+      expect(pushRequests).toHaveLength(1);
+      expect(pushRequests[0]!.url).toContain("/api/v1/sync/events/push");
+      const pushBody = pushRequests[0]!.body as { events: Array<Record<string, unknown>> };
+      expect(pushBody.events).toHaveLength(1);
+      expect(pushBody.events[0]!.event_id).toBe("event-uuid-1");
+      expect(pushBody.events[0]!.entity).toBe("account");
+      expect(pushBody.events[0]!.entity_id).toBe(accountId);
+      expect(pushBody.events[0]!.payload_key_version).toBe(1);
+      const pushedPayload = pushBody.events[0]!.payload as string;
+      const decrypted = (await crypto.decrypt(dek, pushedPayload)).value;
+      expect(JSON.parse(decrypted)).toEqual({ id: "acct-uuid", name: "My Account" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("schedules retry for retryable and auth push failures", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const accountId = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    const rootKey = Buffer.from(new Uint8Array(32).fill(13)).toString("base64");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-uuid-2', 'account', '${accountId}', 'update', '2026-01-01T00:00:00Z',
+        '{"change":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 1,
+      }),
+    );
+    let pushResponseStatus = 500;
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 1,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          return Response.json(
+            { code: "PUSH_FAILED", message: "server error" },
+            { status: pushResponseStatus },
+          );
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      // 500 retryable — outbox should get a retry_count increment and next_retry_at
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      const afterRetryable = db
+        .query<
+          { retry_count: number; next_retry_at: string | null; status: string },
+          []
+        >("SELECT retry_count, next_retry_at, status FROM sync_outbox WHERE event_id = 'event-uuid-2'")
+        .get();
+      expect(afterRetryable?.status).toBe("pending");
+      expect(afterRetryable?.retry_count).toBe(1);
+      expect(afterRetryable?.next_retry_at).not.toBeNull();
+
+      // Reset retry state so the event is re-eligible
+      db.prepare(
+        "UPDATE sync_outbox SET retry_count = 0, next_retry_at = NULL WHERE event_id = 'event-uuid-2'",
+      ).run();
+
+      // 401 auth failure — should schedule reauth retry (status stays pending)
+      pushResponseStatus = 401;
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      const afterAuth = db
+        .query<
+          { retry_count: number; next_retry_at: string | null; status: string },
+          []
+        >("SELECT retry_count, next_retry_at, status FROM sync_outbox WHERE event_id = 'event-uuid-2'")
+        .get();
+      expect(afterAuth?.status).toBe("pending");
+      expect(afterAuth?.retry_count).toBe(1);
+      expect(afterAuth?.next_retry_at).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("dead-letters outbox events on permanent push errors and KEY_VERSION_MISMATCH", async () => {
+    const db = new Database(":memory:");
+    const secretService = createMemorySecretService();
+    const accountId = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    const staleAccountId = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
+    const rootKey = Buffer.from(new Uint8Array(32).fill(17)).toString("base64");
+    db.exec(`
+      CREATE TABLE sync_cursor (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        cursor BIGINT NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_engine_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        lock_version BIGINT NOT NULL DEFAULT 0,
+        last_push_at TEXT,
+        last_pull_at TEXT,
+        last_error TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_cycle_status TEXT,
+        last_cycle_duration_ms BIGINT
+      );
+      CREATE TABLE sync_outbox (
+        event_id TEXT PRIMARY KEY NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        op TEXT NOT NULL,
+        client_timestamp TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        payload_key_version INTEGER NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT,
+        last_error TEXT,
+        last_error_code TEXT,
+        device_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE sync_device_config (
+        device_id TEXT PRIMARY KEY NOT NULL,
+        key_version INTEGER,
+        trust_state TEXT NOT NULL DEFAULT 'untrusted',
+        last_bootstrap_at TEXT,
+        min_snapshot_created_at TEXT
+      );
+      INSERT INTO sync_cursor (id, cursor, updated_at) VALUES (1, 5, '2026-01-01T00:00:00Z');
+      INSERT INTO sync_engine_state (id, lock_version, consecutive_failures) VALUES (1, 2, 0);
+      INSERT INTO sync_outbox (
+        event_id, entity, entity_id, op, client_timestamp, payload,
+        payload_key_version, sent, status, retry_count, device_id, created_at
+      ) VALUES (
+        'event-perm-1', 'account', '${accountId}', 'create', '2026-01-01T00:00:00Z',
+        '{"perm":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+      );
+    `);
+    secretService.entries.set("sync_refresh_token", "refresh-token");
+    secretService.entries.set(
+      "sync_identity",
+      JSON.stringify({
+        version: 2,
+        deviceNonce: "nonce-1",
+        deviceId: "device-1",
+        rootKey,
+        keyVersion: 2,
+      }),
+    );
+    let pushResponseStatus = 400;
+    let pushResponseBody = JSON.stringify({ code: "INVALID_PAYLOAD" });
+    const service = createLocalConnectDeviceSyncService({
+      db,
+      secretService,
+      env: { CONNECT_API_URL: "https://api.example.test" },
+      fetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/auth/v1/token")) {
+          return Response.json({ access_token: "access-token" });
+        }
+        if (url.includes("/api/v1/sync/team/devices/device-1") && !url.includes("pairing")) {
+          return Response.json({
+            id: "device-1",
+            display_name: "TestDevice",
+            trust_state: "trusted",
+            trusted_key_version: 2,
+          });
+        }
+        if (url.includes("/api/v1/sync/events/reconcile-ready-state")) {
+          return Response.json({ action: "NOOP" });
+        }
+        if (url.includes("/api/v1/sync/events/push")) {
+          return new Response(pushResponseBody, {
+            status: pushResponseStatus,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return Response.json({ code: "NOT_FOUND" }, { status: 404 });
+      },
+    });
+
+    try {
+      // 400 permanent error — outbox event should be dead-lettered
+      await expect(service.triggerDeviceSyncCycle()).resolves.toMatchObject({
+        status: "push_error",
+        pushedCount: 0,
+      });
+      expect(
+        db
+          .query<
+            { status: string; last_error_code: string | null },
+            []
+          >("SELECT status, last_error_code FROM sync_outbox WHERE event_id = 'event-perm-1'")
+          .get(),
+      ).toMatchObject({ status: "dead", last_error_code: "permanent" });
+
+      // Insert new stale-key-version event alongside a current-key-version event.
+      // KEY_VERSION_MISMATCH with only stale events → stale dead-lettered, cycle ok.
+      db.prepare(
+        `INSERT INTO sync_outbox (
+          event_id, entity, entity_id, op, client_timestamp, payload,
+          payload_key_version, sent, status, retry_count, device_id, created_at
+        ) VALUES (
+          'event-stale-1', 'account', '${staleAccountId}', 'create', '2026-01-01T00:00:00Z',
+          '{"stale":true}', 1, 0, 'pending', 0, 'device-1', '2026-01-01T00:00:00Z'
+        )`,
+      ).run();
+      pushResponseStatus = 400;
+      pushResponseBody = JSON.stringify({ code: "KEY_VERSION_MISMATCH", message: "mismatch" });
+      const result = await service.triggerDeviceSyncCycle();
+      expect(result).toMatchObject({ status: "ok", pushedCount: 0 });
+      expect(
+        db
+          .query<
+            { status: string; last_error_code: string | null },
+            []
+          >("SELECT status, last_error_code FROM sync_outbox WHERE event_id = 'event-stale-1'")
+          .get(),
+      ).toMatchObject({ status: "dead", last_error_code: "key_version_mismatch" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("returns ok for READY pull-tail trigger cycle when cursors already match", async () => {
     const db = new Database(":memory:");
     const secretService = createMemorySecretService();
