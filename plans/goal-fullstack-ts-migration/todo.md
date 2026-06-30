@@ -7449,6 +7449,11 @@ contract:
   gap was fixed by asserting the exact normalized tool list and excluding
   mutation/CSV tools; focused provider/AI runtime tests and full repository
   check passed.
+- `pr5-runtime-ai-tool-result-assertions`: verification passed. The stream smoke
+  now verifies both `get_accounts` and `get_cash_balances` execute successfully,
+  the cash tool returns base-currency data, and the follow-up provider request
+  carries the cash tool result. Focused AI runtime test and full repository
+  check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
