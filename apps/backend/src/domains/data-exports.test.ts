@@ -77,6 +77,41 @@ describe("TS data export domain", () => {
     }
   });
 
+  test("formats CSV exports with Rust-compatible headers and JSON string escaping", async () => {
+    const db = new Database(":memory:");
+    const service = createDataExportService({
+      db,
+      activityService: unusedActivityService,
+      goalService: unusedGoalService,
+      getHistoricalValuations: unusedValuationGetter,
+      accountService: {
+        listAccounts() {
+          return [
+            {
+              assetId: "AAPL",
+              name: 'Item with "quotes"',
+              notes: "Comma, and new\nline",
+              quantity: 10,
+            },
+          ];
+        },
+      } as unknown as AccountService,
+    });
+
+    try {
+      const bytes = await service.exportData("accounts", "csv");
+      if (!bytes) {
+        throw new Error("Expected CSV export content");
+      }
+
+      expect(new TextDecoder().decode(bytes)).toBe(
+        '"symbol","name","notes","quantity"\n"AAPL","Item with \\"quotes\\"","Comma, and new\\nline","10"',
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("exports portfolio history from the canonical total account snapshot", async () => {
     const db = new Database(":memory:");
     const valuationCalls: Array<{
