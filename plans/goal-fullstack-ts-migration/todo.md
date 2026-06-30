@@ -7325,6 +7325,11 @@ contract:
   `/api/v1/utilities/export/accounts/csv` responses use CSV content type and
   include persisted account fields through the HTTP seam. Focused runtime test,
   backend type-check, and full repository check passed.
+- `pr5-device-sync-bootstrap-missing-hook-error`: verification passed. Direct
+  pairing confirm/flow paths now return explicit `internal_error` responses when
+  a remote snapshot is available but the service lacks bootstrap apply wiring,
+  instead of stale `not_implemented` disabled errors; waiting-snapshot behavior
+  remains unchanged. Full device-sync tests and full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
