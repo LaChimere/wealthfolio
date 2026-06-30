@@ -7377,6 +7377,10 @@ contract:
   `scripts/ci-check.sh --full` all include backend contract tests so command
   surface, normalization, and compatibility preflight evidence is covered by CI.
   `bun run test:backend-contracts` and full repository check passed.
+- `pr5-ci-test-wiring-dual-review`: verification passed. Claude Opus 4.8 xhigh
+  and GPT-5.5 xhigh reviewed add-on SDK and backend-contracts test integration
+  and found no actionable script, runner, CI ordering, workspace,
+  duplicate/missing check, false-positive, or full-check issues.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
