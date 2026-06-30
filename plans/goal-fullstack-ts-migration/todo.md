@@ -7612,6 +7612,12 @@ contract:
   search results from Finnhub fallback now report `dataSource: "FINNHUB"` like
   the Rust Finnhub provider instead of inheriting Yahoo's data source label.
   Focused market-data/runtime tests and full repository check passed.
+- `pr5-market-data-finnhub-source-review-fix`: verification passed. Review found
+  two unrelated Yahoo expectations were accidentally changed and one non-MIC
+  Finnhub fallback assertion was missed; the test suite now keeps quote
+  history/existing Yahoo asset expectations as `YAHOO` and expects `FINNHUB`
+  only for real Finnhub fallback results. Focused market-data/runtime tests and
+  full repository check passed.
 - Follow-ups: continue other low-risk domain slices; broader health
   price/quote/FX/classification/consistency checks and real market sync fix
   execution move with the health/calculation services; the automatic FX market
